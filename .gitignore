@@ -1,6 +1,7 @@
 # Node
 node_modules/
 npm-debug.log
+backend/node_modules/
 # Environment variables
 .env
 # OS files
