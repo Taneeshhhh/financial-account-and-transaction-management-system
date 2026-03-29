@@ -1,15 +1,12 @@
 const express = require('express');
 const router = express.Router();
-const db = require('../config/db');
 
-router.get('/', (req, res) => {
-    db.query('SELECT * FROM Customers', (err, results) => {
-        if (err) {
-            console.error(err);
-            return res.status(500).send('Server Error');
-        }
-        res.json(results);
-    });
-});
+const {
+    getCustomers,
+    getCustomerById
+} = require('../controllers/customerController');
+
+router.get('/', getCustomers);
+router.get('/:id', getCustomerById);
 
 module.exports = router;
