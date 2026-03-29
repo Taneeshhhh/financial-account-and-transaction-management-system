@@ -28,13 +28,14 @@ const customerRoutes = require('./routes/customerRoutes');
 const accountRoutes = require('./routes/accountRoutes');
 const transactionRoutes = require('./routes/transactionRoutes');
 const fraudRoutes = require('./routes/fraudRoutes');
+const dashboardRoutes = require('./routes/dashboardRoutes');
 
 
 app.use('/api/customers', customerRoutes);
 app.use('/api/accounts', accountRoutes);
 app.use('/api/transactions', transactionRoutes);
 app.use('/api/fraud', fraudRoutes);
-
+app.use('/api/dashboard', dashboardRoutes);
 
 const PORT = 5000;
 
