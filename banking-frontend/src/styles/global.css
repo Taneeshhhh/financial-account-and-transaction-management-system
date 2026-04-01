@@ -65,6 +65,7 @@ a {
 }
 
 .dashboard-nav__link {
+  display: block;
   width: 100%;
   padding: 14px 16px;
   border: 0;
@@ -86,6 +87,11 @@ a {
   background: rgba(255, 255, 255, 0.14);
   color: #fff;
   transform: translateX(2px);
+}
+
+.dashboard-nav__link--disabled {
+  opacity: 0.52;
+  cursor: not-allowed;
 }
 
 .dashboard-logout {
@@ -254,6 +260,13 @@ a {
   margin-bottom: 18px;
 }
 
+.dashboard-panel__link {
+  color: #0f5c7a;
+  font-family: 'Trebuchet MS', Arial, sans-serif;
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
 .dashboard-stack {
   display: grid;
   gap: 14px;
@@ -339,6 +352,19 @@ a {
   color: #b91c1c;
 }
 
+.dashboard-badge--expired,
+.dashboard-badge--cancelled,
+.dashboard-badge--defaulted {
+  background: rgba(120, 53, 15, 0.12);
+  color: #9a3412;
+}
+
+.dashboard-badge--under-review,
+.dashboard-badge--pending {
+  background: rgba(180, 83, 9, 0.12);
+  color: #b45309;
+}
+
 .dashboard-table {
   margin-top: 18px;
 }
@@ -366,6 +392,34 @@ a {
 
 .dashboard-table__row--transactions {
   grid-template-columns: 1.1fr 1fr 0.7fr 1fr 0.9fr 0.9fr;
+}
+
+.dashboard-table__row--transactions-extended {
+  grid-template-columns: 1.1fr 1fr 0.6fr 0.9fr 0.8fr 0.8fr 0.9fr 0.9fr;
+}
+
+.dashboard-table__row--loans {
+  grid-template-columns: 1.1fr 0.9fr 0.85fr 0.85fr 0.75fr 0.55fr 0.6fr 0.7fr 0.8fr;
+}
+
+.dashboard-inline-note {
+  display: block;
+  margin-top: 4px;
+  color: #587185;
+  font-family: 'Trebuchet MS', Arial, sans-serif;
+  font-size: 0.78rem;
+}
+
+.dashboard-grid-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.dashboard-mini-card--emphasis {
+  background:
+    radial-gradient(circle at top right, rgba(15, 92, 122, 0.12), transparent 34%),
+    rgba(246, 250, 252, 0.96);
 }
 
 .text-credit {
@@ -405,6 +459,14 @@ a {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+}
+
+.dashboard-profile__summary--cards {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.dashboard-layout--profile {
+  grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
 }
 
 .dashboard-profile__form {
@@ -752,6 +814,10 @@ a {
 
   .dashboard-product-card__grid,
   .dashboard-profile__summary {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-profile__summary--cards {
     grid-template-columns: 1fr;
   }
 
