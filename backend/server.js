@@ -29,8 +29,10 @@ const accountRoutes = require('./routes/accountRoutes');
 const transactionRoutes = require('./routes/transactionRoutes');
 const fraudRoutes = require('./routes/fraudRoutes');
 const dashboardRoutes = require('./routes/dashboardRoutes');
+const authRoutes = require('./routes/authRoutes');
 
 
+app.use('/api', authRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api/accounts', accountRoutes);
 app.use('/api/transactions', transactionRoutes);
