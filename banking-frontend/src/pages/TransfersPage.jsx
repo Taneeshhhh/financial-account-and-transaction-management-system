@@ -6,13 +6,21 @@ function TransfersPage() {
   const {
     dashboard,
     isLoading,
+    isSubmittingTransfer,
     error,
     success,
     storedUser,
     handleLogout,
+    transferForm,
+    handleTransferFormChange,
+    handleTransferSubmit,
   } = useCustomerDashboard()
 
   const transfers = dashboard?.recent_transfers || []
+  const accounts = dashboard?.accounts || []
+  const senderAccount = accounts.find(
+    (account) => String(account.account_id) === String(transferForm.sender_account_id)
+  )
   const outgoingTransfers = transfers.filter((transfer) => transfer.transfer_direction === 'Outgoing')
   const incomingTransfers = transfers.filter((transfer) => transfer.transfer_direction === 'Incoming')
   const totalOutgoing = outgoingTransfers.reduce(
@@ -33,14 +41,14 @@ function TransfersPage() {
       isLoading={isLoading}
       onLogout={handleLogout}
       title="Transfers Activity"
-      description="A transfer-focused page using the `Transfers` table fields: sender account, receiver account, amount, transfer mode, reference number, remarks, status, initiation time, completion time, and transfer direction."
+      description="Move money between accounts with password confirmation. Successful transfers update the Transfers table, create matching debit and credit transaction rows, and refresh both account balances atomically."
       actions={
         <>
           <Link className="button-link button-link--primary" to="/dashboard/transactions">
             Open Transactions
           </Link>
-          <Link className="button-link button-link--secondary" to="/dashboard/cards">
-            View Cards
+          <Link className="button-link button-link--secondary" to="/dashboard/accounts">
+            View Accounts
           </Link>
         </>
       }
@@ -54,17 +62,126 @@ function TransfersPage() {
         <article className="dashboard-card">
           <span>Total Outgoing</span>
           <strong>{formatCurrency(totalOutgoing)}</strong>
-          <p>Based on rows marked as outgoing in the dashboard payload.</p>
+          <p>Successful outgoing movement from customer-linked accounts.</p>
         </article>
         <article className="dashboard-card">
-          <span>Total Incoming</span>
-          <strong>{formatCurrency(totalIncoming)}</strong>
-          <p>Based on rows marked as incoming in the dashboard payload.</p>
+          <span>Transfer Balance</span>
+          <strong>
+            {senderAccount
+              ? formatCurrency(senderAccount.account_balance, senderAccount.account_currency)
+              : formatCurrency(0)}
+          </strong>
+          <p>
+            {senderAccount
+              ? `${senderAccount.account_number} is ${senderAccount.account_status}.`
+              : 'Select a source account to review its current balance.'}
+          </p>
         </article>
       </div>
 
       <div className="dashboard-layout">
         <div className="dashboard-column">
+          <article className="dashboard-panel">
+            <div className="dashboard-panel__header">
+              <div>
+                <p className="hero-card__eyebrow">Send Money</p>
+                <h3>Create a customer transfer</h3>
+              </div>
+            </div>
+            <form className="auth-form dashboard-profile__form" onSubmit={handleTransferSubmit}>
+              <div className="form-grid">
+                <label className="field-group">
+                  <span>From account</span>
+                  <select
+                    name="sender_account_id"
+                    value={transferForm.sender_account_id}
+                    onChange={handleTransferFormChange}
+                    disabled={isSubmittingTransfer || accounts.length === 0}
+                  >
+                    <option value="">Select account</option>
+                    {accounts.map((account) => (
+                      <option key={account.account_id} value={account.account_id}>
+                        {account.account_number} · {account.account_type} · {account.account_status}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field-group">
+                  <span>Destination account no</span>
+                  <input
+                    name="destination_account_number"
+                    type="text"
+                    value={transferForm.destination_account_number}
+                    onChange={handleTransferFormChange}
+                    disabled={isSubmittingTransfer}
+                    placeholder="Enter account number"
+                  />
+                </label>
+                <label className="field-group">
+                  <span>Amount</span>
+                  <input
+                    name="transfer_amount"
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={transferForm.transfer_amount}
+                    onChange={handleTransferFormChange}
+                    disabled={isSubmittingTransfer}
+                    placeholder="0.00"
+                  />
+                </label>
+                <label className="field-group">
+                  <span>Password</span>
+                  <input
+                    name="password"
+                    type="password"
+                    value={transferForm.password}
+                    onChange={handleTransferFormChange}
+                    disabled={isSubmittingTransfer}
+                    placeholder="Confirm your password"
+                  />
+                </label>
+              </div>
+              <label className="field-group">
+                <span>Description</span>
+                <input
+                  name="transfer_remarks"
+                  type="text"
+                  value={transferForm.transfer_remarks}
+                  onChange={handleTransferFormChange}
+                  disabled={isSubmittingTransfer}
+                  placeholder="What is this transfer for?"
+                />
+              </label>
+              <div className="dashboard-profile__summary dashboard-profile__summary--cards">
+                <div className="dashboard-mini-card">
+                  <strong>From account status</strong>
+                  <p>{senderAccount?.account_status || 'No account selected'}</p>
+                </div>
+                <div className="dashboard-mini-card">
+                  <strong>Available balance</strong>
+                  <p>
+                    {senderAccount
+                      ? formatCurrency(senderAccount.account_balance, senderAccount.account_currency)
+                      : 'Select an account first'}
+                  </p>
+                </div>
+              </div>
+              {senderAccount && senderAccount.account_status !== 'Active' ? (
+                <p className="form-error">
+                  This account is {senderAccount.account_status.toLowerCase()}, so outgoing transfers are blocked.
+                </p>
+              ) : null}
+              <button
+                type="submit"
+                className="button-link button-link--primary auth-submit"
+                disabled={isSubmittingTransfer || !senderAccount || senderAccount.account_status !== 'Active'}
+              >
+                {isSubmittingTransfer ? 'Processing Transfer...' : 'Transfer Money'}
+              </button>
+            </form>
+          </article>
+
           <article className="dashboard-panel">
             <div className="dashboard-panel__header">
               <div>
@@ -117,8 +234,8 @@ function TransfersPage() {
                 <p>{incomingTransfers.length} transfer{incomingTransfers.length === 1 ? '' : 's'} received into customer-linked accounts.</p>
               </article>
               <article className="dashboard-mini-card">
-                <strong>Status coverage</strong>
-                <p>{new Set(transfers.map((transfer) => transfer.transfer_status)).size} distinct transfer status values are present in the recent feed.</p>
+                <strong>Total incoming</strong>
+                <p>{formatCurrency(totalIncoming)} has been received across the current feed.</p>
               </article>
             </div>
           </article>

@@ -1,20 +1,43 @@
 import { Link } from 'react-router-dom'
 import CustomerDashboardLayout from '../components/CustomerDashboardLayout.jsx'
-import { formatCurrency, formatDate, useCustomerDashboard } from '../dashboard/customerDashboard.js'
+import {
+  accountStatusOptions,
+  accountTypeOptions,
+  formatCurrency,
+  formatDate,
+  useCustomerDashboard,
+} from '../dashboard/customerDashboard.js'
 
 function AccountsPage() {
   const {
     dashboard,
     isLoading,
+    isCreatingAccount,
+    isUpdatingAccountStatus,
+    isSubmittingTransfer,
     error,
     success,
     storedUser,
     handleLogout,
+    accountForm,
+    transferForm,
+    handleAccountFormChange,
+    handleCreateAccount,
+    handleAccountStatusChange,
+    handleTransferFormChange,
+    handleTransferSubmit,
   } = useCustomerDashboard()
 
   const accounts = dashboard?.accounts || []
   const cards = dashboard?.cards || []
   const loans = dashboard?.loans || []
+  const frozenAccounts = accounts.filter((account) => account.account_status === 'Frozen').length
+  const senderAccount = accounts.find(
+    (account) => String(account.account_id) === String(transferForm.sender_account_id)
+  )
+  const destinationAccount = accounts.find(
+    (account) => account.account_number === transferForm.destination_account_number
+  )
 
   const title = dashboard?.profile
     ? `${dashboard.profile.first_name}'s Accounts`
@@ -56,9 +79,9 @@ function AccountsPage() {
           <p>Combined `account_balance` across all linked accounts.</p>
         </article>
         <article className="dashboard-card">
-          <span>Active Accounts</span>
-          <strong>{dashboard?.summary?.active_accounts || 0}</strong>
-          <p>Accounts currently marked `Active` in the schema.</p>
+          <span>Frozen Accounts</span>
+          <strong>{frozenAccounts}</strong>
+          <p>Frozen accounts cannot submit new transactions until reactivated.</p>
         </article>
       </div>
 
@@ -86,14 +109,50 @@ function AccountsPage() {
                     </div>
                     <div className="dashboard-product-card__grid">
                       <p>Balance: {formatCurrency(account.account_balance, account.account_currency || 'INR')}</p>
+                      <p>Available to transact: {account.account_status === 'Active' ? 'Yes' : 'No'}</p>
                       <p>Currency: {account.account_currency}</p>
                       <p>Interest rate: {account.annual_interest_rate ? `${account.annual_interest_rate}%` : 'Not applicable'}</p>
                       <p>Opened date: {formatDate(account.opened_date)}</p>
+                      <p>Closed date: {formatDate(account.closed_date)}</p>
                       <p>Branch: {account.branch_name}</p>
                       <p>IFSC code: {account.ifsc_code}</p>
                       <p>City: {account.branch_city}</p>
                       <p>State: {account.branch_state}</p>
                     </div>
+                    <form
+                      className="dashboard-inline-form"
+                      onSubmit={(event) => {
+                        event.preventDefault()
+                        const nextStatus = new FormData(event.currentTarget).get('account_status')
+                        handleAccountStatusChange(account.account_id, nextStatus)
+                      }}
+                    >
+                      <label className="field-group">
+                        <span>Update account status</span>
+                        <select
+                          name="account_status"
+                          defaultValue={account.account_status}
+                          disabled={isUpdatingAccountStatus || account.account_status === 'Closed'}
+                        >
+                          {accountStatusOptions.map((status) => (
+                            <option key={status} value={status}>
+                              {status}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <button
+                        type="submit"
+                        className="button-link button-link--secondary dashboard-inline-button"
+                        disabled={isUpdatingAccountStatus || account.account_status === 'Closed'}
+                      >
+                        {account.account_status === 'Closed'
+                          ? 'Account Closed'
+                          : isUpdatingAccountStatus
+                            ? 'Saving...'
+                            : 'Save Status'}
+                      </button>
+                    </form>
                   </article>
                 ))
               ) : (
@@ -104,6 +163,148 @@ function AccountsPage() {
         </div>
 
         <div className="dashboard-column">
+          <article className="dashboard-panel">
+            <div className="dashboard-panel__header">
+              <div>
+                <p className="hero-card__eyebrow">Open Account</p>
+                <h3>Create a new customer account</h3>
+              </div>
+            </div>
+            <form className="auth-form dashboard-profile__form" onSubmit={handleCreateAccount}>
+              <label className="field-group">
+                <span>Account type</span>
+                <select
+                  name="account_type"
+                  value={accountForm.account_type}
+                  onChange={handleAccountFormChange}
+                  disabled={isCreatingAccount}
+                >
+                  {accountTypeOptions.map((type) => (
+                    <option key={type} value={type}>
+                      {type}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <article className="dashboard-mini-card">
+                <strong>Opening balance</strong>
+                <p>Every new account starts at {formatCurrency(0)} and cannot be edited during creation.</p>
+              </article>
+              <button type="submit" className="button-link button-link--primary auth-submit" disabled={isCreatingAccount}>
+                {isCreatingAccount ? 'Creating Account...' : 'Create New Account'}
+              </button>
+            </form>
+          </article>
+
+          <article className="dashboard-panel">
+            <div className="dashboard-panel__header">
+              <div>
+                <p className="hero-card__eyebrow">Own Account Transfer</p>
+                <h3>Move money between your own accounts</h3>
+              </div>
+            </div>
+            <form className="auth-form dashboard-profile__form" onSubmit={handleTransferSubmit}>
+              <div className="form-grid">
+                <label className="field-group">
+                  <span>From account</span>
+                  <select
+                    name="sender_account_id"
+                    value={transferForm.sender_account_id}
+                    onChange={handleTransferFormChange}
+                    disabled={isSubmittingTransfer || accounts.length === 0}
+                  >
+                    <option value="">Select source account</option>
+                    {accounts.map((account) => (
+                      <option key={account.account_id} value={account.account_id}>
+                        {account.account_number} · {account.account_type} · {account.account_status}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field-group">
+                  <span>To account</span>
+                  <select
+                    name="destination_account_number"
+                    value={transferForm.destination_account_number}
+                    onChange={handleTransferFormChange}
+                    disabled={isSubmittingTransfer || accounts.length < 2}
+                  >
+                    <option value="">Select destination account</option>
+                    {accounts
+                      .filter((account) => String(account.account_id) !== String(transferForm.sender_account_id))
+                      .map((account) => (
+                        <option key={account.account_id} value={account.account_number}>
+                          {account.account_number} · {account.account_type} · {account.account_status}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                <label className="field-group">
+                  <span>Amount</span>
+                  <input
+                    name="transfer_amount"
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={transferForm.transfer_amount}
+                    onChange={handleTransferFormChange}
+                    disabled={isSubmittingTransfer}
+                    placeholder="0.00"
+                  />
+                </label>
+                <label className="field-group">
+                  <span>Password</span>
+                  <input
+                    name="password"
+                    type="password"
+                    value={transferForm.password}
+                    onChange={handleTransferFormChange}
+                    disabled={isSubmittingTransfer}
+                    placeholder="Confirm your password"
+                  />
+                </label>
+              </div>
+              <label className="field-group">
+                <span>Description</span>
+                <input
+                  name="transfer_remarks"
+                  type="text"
+                  value={transferForm.transfer_remarks}
+                  onChange={handleTransferFormChange}
+                  disabled={isSubmittingTransfer}
+                  placeholder="Example: Move savings into new account"
+                />
+              </label>
+              <div className="dashboard-profile__summary dashboard-profile__summary--cards">
+                <div className="dashboard-mini-card">
+                  <strong>Source balance</strong>
+                  <p>
+                    {senderAccount
+                      ? formatCurrency(senderAccount.account_balance, senderAccount.account_currency)
+                      : 'Select a source account'}
+                  </p>
+                </div>
+                <div className="dashboard-mini-card">
+                  <strong>Destination status</strong>
+                  <p>{destinationAccount?.account_status || 'Select a destination account'}</p>
+                </div>
+              </div>
+              <button
+                type="submit"
+                className="button-link button-link--primary auth-submit"
+                disabled={
+                  isSubmittingTransfer ||
+                  !senderAccount ||
+                  !destinationAccount ||
+                  senderAccount.account_status !== 'Active' ||
+                  destinationAccount.account_status !== 'Active'
+                }
+              >
+                {isSubmittingTransfer ? 'Processing Transfer...' : 'Transfer Between My Accounts'}
+              </button>
+            </form>
+          </article>
+
           <article className="dashboard-panel">
             <div className="dashboard-panel__header">
               <div>

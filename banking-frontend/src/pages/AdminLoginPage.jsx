@@ -44,7 +44,7 @@ function AdminLoginPage() {
 
       localStorage.setItem('token', data.token)
       localStorage.setItem('bank_user', JSON.stringify(data.user || {}))
-      navigate('/dashboard')
+      navigate('/admin-dashboard')
     } catch (requestError) {
       setError(
         requestError instanceof Error

@@ -27,17 +27,21 @@ app.get('/test-db', (req, res) => {
 const customerRoutes = require('./routes/customerRoutes');
 const accountRoutes = require('./routes/accountRoutes');
 const transactionRoutes = require('./routes/transactionRoutes');
+const transferRoutes = require('./routes/transferRoutes');
 const fraudRoutes = require('./routes/fraudRoutes');
 const dashboardRoutes = require('./routes/dashboardRoutes');
 const authRoutes = require('./routes/authRoutes');
+const adminRoutes = require('./routes/adminRoutes');
 
 
 app.use('/api', authRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api/accounts', accountRoutes);
 app.use('/api/transactions', transactionRoutes);
+app.use('/api/transfers', transferRoutes);
 app.use('/api/fraud', fraudRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/admin', adminRoutes);
 
 const PORT = 5000;
 

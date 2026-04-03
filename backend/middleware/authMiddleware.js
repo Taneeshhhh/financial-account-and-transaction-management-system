@@ -26,3 +26,11 @@ exports.requireCustomer = (req, res, next) => {
 
     return next();
 };
+
+exports.requireAdmin = (req, res, next) => {
+    if (!req.user || req.user.role !== 'admin' || !req.user.accountant_id) {
+        return res.status(403).json({ message: 'Admin access is required for this resource.' });
+    }
+
+    return next();
+};

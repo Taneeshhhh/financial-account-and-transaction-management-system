@@ -46,6 +46,12 @@ a {
   color: #f8fafc;
 }
 
+.dashboard-sidebar--admin {
+  background:
+    radial-gradient(circle at top, rgba(212, 166, 61, 0.18), transparent 35%),
+    linear-gradient(180deg, #17324d 0%, #28536d 100%);
+}
+
 .dashboard-sidebar__brand h2 {
   margin: 0;
   font-size: 1.8rem;
@@ -172,6 +178,10 @@ a {
   font-weight: 700;
 }
 
+.dashboard-user__avatar--admin {
+  background: #9a6b12;
+}
+
 .dashboard-content {
   display: grid;
   gap: 22px;
@@ -193,6 +203,12 @@ a {
   justify-content: space-between;
   gap: 18px;
   padding: 28px;
+}
+
+.dashboard-hero--admin {
+  background:
+    radial-gradient(circle at top right, rgba(212, 166, 61, 0.18), transparent 28%),
+    rgba(255, 255, 255, 0.82);
 }
 
 .dashboard-hero__actions {
@@ -270,6 +286,20 @@ a {
 .dashboard-stack {
   display: grid;
   gap: 14px;
+}
+
+.dashboard-inline-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+  margin-top: 16px;
+}
+
+.dashboard-inline-button {
+  border: 0;
+  cursor: pointer;
+  white-space: nowrap;
 }
 
 .dashboard-product-card,
@@ -436,6 +466,24 @@ a {
   display: grid;
   gap: 12px;
   margin-top: 18px;
+}
+
+.dashboard-note-card {
+  padding: 18px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.dashboard-note-card strong {
+  display: block;
+  font-size: 1rem;
+}
+
+.dashboard-note-card p {
+  margin: 8px 0 0;
+  color: rgba(248, 250, 252, 0.82);
+  font-family: 'Trebuchet MS', Arial, sans-serif;
 }
 
 .dashboard-action {
@@ -654,6 +702,23 @@ a {
     transform 160ms ease;
 }
 
+.field-group textarea {
+  width: 100%;
+  min-height: 110px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(16, 37, 59, 0.14);
+  background: rgba(246, 250, 252, 0.96);
+  color: #10253b;
+  font: inherit;
+  outline: none;
+  resize: vertical;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
 .field-group input:focus {
   border-color: #0f5c7a;
   box-shadow: 0 0 0 4px rgba(15, 92, 122, 0.12);
@@ -661,6 +726,12 @@ a {
 }
 
 .field-group select:focus {
+  border-color: #0f5c7a;
+  box-shadow: 0 0 0 4px rgba(15, 92, 122, 0.12);
+  transform: translateY(-1px);
+}
+
+.field-group textarea:focus {
   border-color: #0f5c7a;
   box-shadow: 0 0 0 4px rgba(15, 92, 122, 0.12);
   transform: translateY(-1px);
@@ -680,6 +751,17 @@ a {
   width: 100%;
   border: 0;
   cursor: pointer;
+}
+
+.dashboard-form-section {
+  margin-top: 18px;
+}
+
+.dashboard-button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 18px;
 }
 
 .auth-submit:disabled {
@@ -810,6 +892,10 @@ a {
   .dashboard-transfer-card__top {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .dashboard-inline-form {
+    grid-template-columns: 1fr;
   }
 
   .dashboard-product-card__grid,

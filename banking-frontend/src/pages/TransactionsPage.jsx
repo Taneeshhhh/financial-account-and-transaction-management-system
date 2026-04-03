@@ -31,8 +31,8 @@ function TransactionsPage() {
       description={description}
       actions={
         <>
-          <Link className="button-link button-link--primary" to="/dashboard/accounts">
-            View Accounts
+          <Link className="button-link button-link--primary" to="/dashboard/transfers">
+            Transfer Money
           </Link>
           <Link className="button-link button-link--secondary" to="/dashboard/profile">
             Update Profile
@@ -52,9 +52,9 @@ function TransactionsPage() {
           <p>Total recent incoming movement across linked accounts.</p>
         </article>
         <article className="dashboard-card">
-          <span>Debits</span>
-          <strong>{formatCurrency(dashboard?.summary?.total_monthly_debits)}</strong>
-          <p>Total recent outgoing movement across linked accounts.</p>
+          <span>Transfers in Feed</span>
+          <strong>{transfers.length}</strong>
+          <p>Use the Transfer Money button to move funds between accounts.</p>
         </article>
       </div>
 

@@ -1,4 +1,5 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
+import AdminDashboardPage from './pages/AdminDashboardPage.jsx'
 import AdminLoginPage from './pages/AdminLoginPage.jsx'
 import AccountsPage from './pages/AccountsPage.jsx'
 import CardsPage from './pages/CardsPage.jsx'
@@ -16,6 +17,7 @@ function App() {
     <Routes>
       <Route path="/" element={<LoginPage />} />
       <Route path="/admin-login" element={<AdminLoginPage />} />
+      <Route path="/admin-dashboard" element={<AdminDashboardPage />} />
       <Route path="/signup" element={<SignupPage />} />
       <Route path="/dashboard" element={<DashboardPage />} />
       <Route path="/dashboard/accounts" element={<AccountsPage />} />

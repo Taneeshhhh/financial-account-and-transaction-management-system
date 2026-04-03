@@ -338,6 +338,7 @@ exports.adminLogin = (req, res) => {
             a.accountant_email,
             a.first_name,
             a.last_name,
+            a.branch_id,
             a.employee_role,
             al.is_active
         FROM admin_Login al
@@ -369,6 +370,7 @@ exports.adminLogin = (req, res) => {
                 sub: admin.admin_login_id,
                 role: 'admin',
                 accountant_id: admin.accountant_id,
+                branch_id: admin.branch_id,
             },
             JWT_SECRET,
             JWT_EXPIRES_IN_SECONDS
@@ -387,6 +389,7 @@ exports.adminLogin = (req, res) => {
                 user_id: admin.admin_login_id,
                 user_role: 'admin',
                 accountant_id: admin.accountant_id,
+                branch_id: admin.branch_id,
                 accountant_email: admin.accountant_email,
                 full_name: `${admin.first_name} ${admin.last_name}`,
                 employee_role: admin.employee_role,
