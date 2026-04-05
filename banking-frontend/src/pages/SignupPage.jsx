@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { apiBaseUrl } from '../config/api'
 
 function SignupPage() {
   const navigate = useNavigate()
@@ -68,7 +69,7 @@ function SignupPage() {
         : { role, ...adminForm, branch_id: Number(adminForm.branch_id) }
 
     try {
-      const response = await fetch('http://localhost:5000/api/signup', {
+      const response = await fetch(`${apiBaseUrl}/signup`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

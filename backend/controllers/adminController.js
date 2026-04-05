@@ -12,6 +12,19 @@ const REVIEW_ACTIONS = ['approve', 'reject'];
 
 const buildInClause = (values) => values.map(() => '?').join(', ');
 
+const optionalQuery = async (query, params = [], fallbackValue = []) => {
+    try {
+        const [rows] = await dbPromise.query(query, params);
+        return rows;
+    } catch (error) {
+        if (error && error.code === 'ER_NO_SUCH_TABLE') {
+            return fallbackValue;
+        }
+
+        throw error;
+    }
+};
+
 const generateUniqueReference = async (tableName, columnName, prefix) => {
     while (true) {
         const reference = generateReferenceNumber(prefix);
@@ -72,7 +85,7 @@ exports.getMyDashboard = async (req, res) => {
             [recentAccounts],
             [loans],
             [branchSummaryRows],
-            [pendingLoanApplicationRows],
+            pendingLoanApplicationRows,
         ] = await Promise.all([
             dbPromise.query(
                 `
@@ -194,7 +207,7 @@ exports.getMyDashboard = async (req, res) => {
                 `,
                 [branchId]
             ),
-            dbPromise.query(
+            optionalQuery(
                 `
                     SELECT
                         la.loan_application_id,
@@ -577,6 +590,22 @@ exports.createCounterTransaction = async (req, res) => {
 };
 
 exports.reviewLoanApplication = async (req, res) => {
+    const [[loanApplicationsTable]] = await dbPromise.query(
+        `
+            SELECT 1 AS present
+            FROM INFORMATION_SCHEMA.TABLES
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = 'Loan_Applications'
+            LIMIT 1
+        `
+    );
+
+    if (!loanApplicationsTable) {
+        return res.status(503).json({
+            message: 'Loan review is unavailable until the Loan_Applications table is added to the database.',
+        });
+    }
+
     const accountantId = req.user.accountant_id;
     const applicationId = Number(req.params.applicationId);
     const action = String(req.body?.action || '').trim().toLowerCase();

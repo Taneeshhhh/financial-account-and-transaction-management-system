@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { apiBaseUrl } from '../config/api'
 
 export const accountTypeOptions = ['Savings', 'Current', 'Fixed Deposit', 'Recurring Deposit']
 export const accountStatusOptions = ['Active', 'Frozen', 'Closed']
@@ -30,8 +31,6 @@ export const sidebarItems = [
   { id: 'transfers', label: 'Transfers', path: '/dashboard/transfers' },
   { id: 'profile', label: 'Profile', path: '/dashboard/profile' },
 ]
-
-const apiBaseUrl = 'http://localhost:5000/api'
 
 export const formatCurrency = (value, currency = 'INR') =>
   new Intl.NumberFormat('en-IN', {

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { apiBaseUrl } from '../config/api'
 
 function AdminLoginPage() {
   const navigate = useNavigate()
@@ -24,7 +25,7 @@ function AdminLoginPage() {
     setIsSubmitting(true)
 
     try {
-      const response = await fetch('http://localhost:5000/api/admin/login', {
+      const response = await fetch(`${apiBaseUrl}/admin/login`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

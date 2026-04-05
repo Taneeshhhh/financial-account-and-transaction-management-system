@@ -41,16 +41,29 @@ const generateUniqueReference = async (tableName, columnName, prefix) => {
     }
 };
 
+const optionalQuery = async (query, params = [], fallbackValue = []) => {
+    try {
+        const [rows] = await dbPromise.query(query, params);
+        return rows;
+    } catch (error) {
+        if (error && error.code === 'ER_NO_SUCH_TABLE') {
+            return fallbackValue;
+        }
+
+        throw error;
+    }
+};
+
 const buildDashboardPayload = async (customerId) => {
     const [
         [customerRows],
         [accountRows],
         [transactionRows],
-        [cardRows],
-        [loanRows],
-        [transferRows],
-        [loanApplicationRows],
-        [loanPaymentRows],
+        cardRows,
+        loanRows,
+        transferRows,
+        loanApplicationRows,
+        loanPaymentRows,
         loanTypeOptions,
     ] = await Promise.all([
         dbPromise.query(
@@ -122,7 +135,7 @@ const buildDashboardPayload = async (customerId) => {
             `,
             [customerId]
         ),
-        dbPromise.query(
+        optionalQuery(
             `
                 SELECT
                     cd.card_id,
@@ -143,7 +156,7 @@ const buildDashboardPayload = async (customerId) => {
             `,
             [customerId]
         ),
-        dbPromise.query(
+        optionalQuery(
             `
                 SELECT
                     l.loan_id,
@@ -164,7 +177,7 @@ const buildDashboardPayload = async (customerId) => {
             `,
             [customerId]
         ),
-        dbPromise.query(
+        optionalQuery(
             `
                 SELECT
                     tr.transfer_id,
@@ -192,7 +205,7 @@ const buildDashboardPayload = async (customerId) => {
             `,
             [customerId, customerId, customerId]
         ),
-        dbPromise.query(
+        optionalQuery(
             `
                 SELECT
                     la.loan_application_id,
@@ -226,7 +239,7 @@ const buildDashboardPayload = async (customerId) => {
             `,
             [customerId]
         ),
-        dbPromise.query(
+        optionalQuery(
             `
                 SELECT
                     lp.payment_id,
@@ -469,9 +482,11 @@ exports.applyForLoan = async (req, res) => {
         }
 
         const annualInterestRate = DEFAULT_LOAN_RATES[loanType] || 10;
-        const estimatedEmi = calculateEmi(requestedAmount, annualInterestRate, tenureMonths);
+        const emiAmount = calculateEmi(requestedAmount, annualInterestRate, tenureMonths);
 
-        const [insertResult] = await dbPromise.query(
+        await dbPromise.beginTransaction();
+
+        const [applicationInsert] = await dbPromise.query(
             `
                 INSERT INTO Loan_Applications (
                     customer_id,
@@ -479,14 +494,13 @@ exports.applyForLoan = async (req, res) => {
                     linked_account_id,
                     loan_type,
                     requested_amount,
-                    approved_amount,
                     annual_interest_rate,
                     tenure_months,
                     estimated_emi,
                     purpose,
                     application_status
                 )
-                VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, 'Pending')
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending')
             `,
             [
                 customerId,
@@ -496,24 +510,36 @@ exports.applyForLoan = async (req, res) => {
                 requestedAmount,
                 annualInterestRate,
                 tenureMonths,
-                estimatedEmi,
+                emiAmount,
                 purpose,
             ]
         );
+
+        await dbPromise.commit();
 
         const [[application]] = await dbPromise.query(
             `
                 SELECT
                     la.loan_application_id,
+                    la.customer_id,
+                    la.branch_id,
+                    la.linked_account_id,
                     la.loan_type,
                     la.requested_amount,
+                    la.approved_amount,
                     la.annual_interest_rate,
                     la.tenure_months,
                     la.estimated_emi,
                     la.purpose,
                     la.application_status,
+                    la.review_notes,
+                    la.reviewed_by,
+                    la.reviewed_at,
+                    la.created_loan_id,
                     la.created_at,
                     a.account_number AS linked_account_number,
+                    a.account_type AS linked_account_type,
+                    a.account_balance AS linked_account_balance,
                     b.branch_name
                 FROM Loan_Applications la
                 JOIN Accounts a ON a.account_id = la.linked_account_id
@@ -521,14 +547,26 @@ exports.applyForLoan = async (req, res) => {
                 WHERE la.loan_application_id = ?
                 LIMIT 1
             `,
-            [insertResult.insertId]
+            [applicationInsert.insertId]
         );
 
         return res.status(201).json({
-            message: 'Loan application submitted successfully.',
-            application,
+            message: 'Loan application submitted successfully and is pending branch accountant approval.',
+            loan_application: application,
         });
     } catch (error) {
+        try {
+            await dbPromise.rollback();
+        } catch {
+            // Ignore rollback failures.
+        }
+
+        if (error && error.code === 'ER_NO_SUCH_TABLE') {
+            return res.status(503).json({
+                message: 'Loan application workflow is not available until the Loan_Applications table is added to the database.',
+            });
+        }
+
         return res.status(500).json({ message: 'Failed to submit the loan application.' });
     }
 };

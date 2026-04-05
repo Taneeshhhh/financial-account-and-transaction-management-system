@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { apiBaseUrl } from '../config/api'
 
 export const adminTransactionTypeOptions = ['Credit', 'Debit']
-
-const apiBaseUrl = 'http://localhost:5000/api'
 
 export function useAdminDashboard() {
   const navigate = useNavigate()
