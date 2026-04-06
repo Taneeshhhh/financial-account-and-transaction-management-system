@@ -1,5 +1,6 @@
 const db = require('../config/db');
 const { signJwt } = require('../utils/jwt');
+const dbPromise = db.promise();
 
 const JWT_SECRET = process.env.JWT_SECRET || 'development-secret-change-me';
 const JWT_EXPIRES_IN_SECONDS = 60 * 60;
@@ -37,6 +38,61 @@ const isDuplicateEntryError = (error) =>
 
 const getMissingFields = (payload, fields) =>
     fields.filter((field) => !payload[field]);
+
+const getRequestIp = (req) => {
+    const forwardedFor = req.headers['x-forwarded-for'];
+
+    if (typeof forwardedFor === 'string' && forwardedFor.trim()) {
+        return forwardedFor.split(',')[0].trim();
+    }
+
+    return (
+        req.ip ||
+        req.connection?.remoteAddress ||
+        req.socket?.remoteAddress ||
+        null
+    );
+};
+
+const recordLoginAttempt = async ({
+    customerId = null,
+    accountantId = null,
+    loginRole,
+    loginIdentifier,
+    ipAddress = null,
+    attemptStatus,
+    failureReason = null,
+}) => {
+    try {
+        await dbPromise.query(
+            `
+                INSERT INTO Login_Attempts (
+                    customer_id,
+                    accountant_id,
+                    login_role,
+                    login_identifier,
+                    ip_address,
+                    attempt_status,
+                    failure_reason
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            `,
+            [
+                customerId,
+                accountantId,
+                loginRole,
+                loginIdentifier,
+                ipAddress,
+                attemptStatus,
+                failureReason,
+            ]
+        );
+    } catch (error) {
+        if (error?.code !== 'ER_NO_SUCH_TABLE') {
+            throw error;
+        }
+    }
+};
 
 exports.signup = (req, res) => {
     const payload = req.body || {};
@@ -245,9 +301,10 @@ exports.signup = (req, res) => {
     });
 };
 
-exports.login = (req, res) => {
+exports.login = async (req, res) => {
     const { email, password } = req.body || {};
     const identifier = (email || '').trim();
+    const ipAddress = getRequestIp(req);
 
     if (!identifier || !password) {
         return res.status(400).json({
@@ -255,30 +312,52 @@ exports.login = (req, res) => {
         });
     }
 
-    const loginQuery = `
-        SELECT
-            cl.customer_login_id,
-            cl.customer_id,
-            c.customer_email,
-            c.first_name,
-            c.last_name,
-            cl.is_active
-        FROM customer_Login cl
-        JOIN customers c ON cl.customer_id = c.customer_id
-        WHERE c.customer_email = ?
-          AND cl.password_hash = SHA2(?, 256)
-        LIMIT 1
-    `;
+    try {
+        const [[customerRecord]] = await dbPromise.query(
+            `
+                SELECT
+                    cl.customer_login_id,
+                    cl.customer_id,
+                    c.customer_email,
+                    c.first_name,
+                    c.last_name,
+                    cl.is_active
+                FROM customer_Login cl
+                JOIN customers c ON cl.customer_id = c.customer_id
+                WHERE c.customer_email = ?
+                LIMIT 1
+            `,
+            [identifier]
+        );
 
-    db.query(loginQuery, [identifier, password], (error, results) => {
-        if (error) {
-            console.error("LOGIN ERROR:", error);
-            return res.status(500).json({ message: 'Failed to process login.' });
-        }
-
-        const user = results[0];
+        const [[user]] = await dbPromise.query(
+            `
+                SELECT
+                    cl.customer_login_id,
+                    cl.customer_id,
+                    c.customer_email,
+                    c.first_name,
+                    c.last_name,
+                    cl.is_active
+                FROM customer_Login cl
+                JOIN customers c ON cl.customer_id = c.customer_id
+                WHERE c.customer_email = ?
+                  AND cl.password_hash = SHA2(?, 256)
+                LIMIT 1
+            `,
+            [identifier, password]
+        );
 
         if (!user) {
+            await recordLoginAttempt({
+                customerId: customerRecord?.customer_id || null,
+                loginRole: 'customer',
+                loginIdentifier: identifier,
+                ipAddress,
+                attemptStatus: 'Failed',
+                failureReason: customerRecord ? 'Invalid password.' : 'Unknown customer email.',
+            });
+
             return res.status(401).json({ message: 'Invalid credentials.' });
         }
 
@@ -288,6 +367,19 @@ exports.login = (req, res) => {
             });
         }
 
+        await recordLoginAttempt({
+            customerId: user.customer_id,
+            loginRole: 'customer',
+            loginIdentifier: identifier,
+            ipAddress,
+            attemptStatus: 'Success',
+        });
+
+        await dbPromise.query(
+            'UPDATE customer_Login SET last_login = NOW() WHERE customer_login_id = ?',
+            [user.customer_login_id]
+        );
+
         const token = signJwt(
             {
                 sub: user.customer_login_id,
@@ -296,12 +388,6 @@ exports.login = (req, res) => {
             },
             JWT_SECRET,
             JWT_EXPIRES_IN_SECONDS
-        );
-
-        db.query(
-            'UPDATE customer_Login SET last_login = NOW() WHERE customer_login_id = ?',
-            [user.customer_login_id],
-            () => {}
         );
 
         return res.json({
@@ -318,12 +404,16 @@ exports.login = (req, res) => {
                         : null,
             },
         });
-    });
+    } catch (error) {
+        console.error('LOGIN ERROR:', error);
+        return res.status(500).json({ message: 'Failed to process login.' });
+    }
 };
 
-exports.adminLogin = (req, res) => {
+exports.adminLogin = async (req, res) => {
     const { email, password } = req.body || {};
     const identifier = (email || '').trim();
+    const ipAddress = getRequestIp(req);
 
     if (!identifier || !password) {
         return res.status(400).json({
@@ -331,31 +421,50 @@ exports.adminLogin = (req, res) => {
         });
     }
 
-    const loginQuery = `
-        SELECT
-            al.admin_login_id,
-            al.accountant_id,
-            a.accountant_email,
-            a.first_name,
-            a.last_name,
-            a.branch_id,
-            a.employee_role,
-            al.is_active
-        FROM admin_Login al
-        JOIN accountants a ON al.accountant_id = a.accountant_id
-        WHERE a.accountant_email = ?
-          AND al.password_hash = SHA2(?, 256)
-        LIMIT 1
-    `;
+    try {
+        const [[adminRecord]] = await dbPromise.query(
+            `
+                SELECT
+                    al.admin_login_id,
+                    al.accountant_id
+                FROM admin_Login al
+                JOIN accountants a ON al.accountant_id = a.accountant_id
+                WHERE a.accountant_email = ?
+                LIMIT 1
+            `,
+            [identifier]
+        );
 
-    db.query(loginQuery, [identifier, password], (error, results) => {
-        if (error) {
-            return res.status(500).json({ message: 'Failed to process admin login.' });
-        }
-
-        const admin = results[0];
+        const [[admin]] = await dbPromise.query(
+            `
+                SELECT
+                    al.admin_login_id,
+                    al.accountant_id,
+                    a.accountant_email,
+                    a.first_name,
+                    a.last_name,
+                    a.branch_id,
+                    a.employee_role,
+                    al.is_active
+                FROM admin_Login al
+                JOIN accountants a ON al.accountant_id = a.accountant_id
+                WHERE a.accountant_email = ?
+                  AND al.password_hash = SHA2(?, 256)
+                LIMIT 1
+            `,
+            [identifier, password]
+        );
 
         if (!admin) {
+            await recordLoginAttempt({
+                accountantId: adminRecord?.accountant_id || null,
+                loginRole: 'admin',
+                loginIdentifier: identifier,
+                ipAddress,
+                attemptStatus: 'Failed',
+                failureReason: adminRecord ? 'Invalid password.' : 'Unknown admin email.',
+            });
+
             return res.status(401).json({ message: 'Invalid admin credentials.' });
         }
 
@@ -364,6 +473,19 @@ exports.adminLogin = (req, res) => {
                 message: 'Admin login is disabled for this account.',
             });
         }
+
+        await recordLoginAttempt({
+            accountantId: admin.accountant_id,
+            loginRole: 'admin',
+            loginIdentifier: identifier,
+            ipAddress,
+            attemptStatus: 'Success',
+        });
+
+        await dbPromise.query(
+            'UPDATE admin_Login SET last_login = NOW() WHERE admin_login_id = ?',
+            [admin.admin_login_id]
+        );
 
         const token = signJwt(
             {
@@ -374,12 +496,6 @@ exports.adminLogin = (req, res) => {
             },
             JWT_SECRET,
             JWT_EXPIRES_IN_SECONDS
-        );
-
-        db.query(
-            'UPDATE admin_Login SET last_login = NOW() WHERE admin_login_id = ?',
-            [admin.admin_login_id],
-            () => {}
         );
 
         return res.json({
@@ -395,5 +511,7 @@ exports.adminLogin = (req, res) => {
                 employee_role: admin.employee_role,
             },
         });
-    });
+    } catch (error) {
+        return res.status(500).json({ message: 'Failed to process admin login.' });
+    }
 };

@@ -4,6 +4,8 @@ const {
     getMyDashboard,
     createCounterTransaction,
     reviewLoanApplication,
+    updateBranchAccount,
+    updateBranchCustomer,
 } = require('../controllers/adminController');
 
 const router = express.Router();
@@ -21,5 +23,7 @@ router.post(
     requireAdmin,
     reviewLoanApplication
 );
+router.put('/accounts/:accountId', requireAuth, requireAdmin, updateBranchAccount);
+router.put('/customers/:customerId', requireAuth, requireAdmin, updateBranchCustomer);
 
 module.exports = router;

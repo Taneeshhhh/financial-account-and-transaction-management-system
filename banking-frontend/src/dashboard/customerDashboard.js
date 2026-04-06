@@ -22,6 +22,24 @@ export const loanPaymentMethodOptions = [
   'Cheque',
 ]
 
+const initialPasswordModalState = {
+  isOpen: false,
+  title: '',
+  description: '',
+  confirmLabel: 'Confirm',
+  password: '',
+}
+
+const initialAccountCreationModalState = {
+  isOpen: false,
+  title: '',
+  description: '',
+  confirmLabel: 'Close',
+  cancelLabel: 'Cancel',
+  showCancel: false,
+  onConfirm: null,
+}
+
 export const sidebarItems = [
   { id: 'overview', label: 'Overview', path: '/dashboard' },
   { id: 'accounts', label: 'Accounts', path: '/dashboard/accounts' },
@@ -81,7 +99,6 @@ export function useCustomerDashboard() {
     destination_account_number: '',
     transfer_amount: '',
     transfer_remarks: '',
-    password: '',
   })
   const [loanApplicationForm, setLoanApplicationForm] = useState({
     loan_type: '',
@@ -106,6 +123,8 @@ export function useCustomerDashboard() {
   const [isSubmittingRepayment, setIsSubmittingRepayment] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+  const [passwordModal, setPasswordModal] = useState(initialPasswordModalState)
+  const [accountCreationModal, setAccountCreationModal] = useState(initialAccountCreationModalState)
 
   const storedUser = useMemo(() => {
     try {
@@ -335,39 +354,39 @@ export function useCustomerDashboard() {
       await loadDashboard()
 
       const newAccount = data.account
-      const hasOtherActiveSource = dashboard?.accounts?.some(
+      const sourceAccount = dashboard?.accounts?.find(
         (account) =>
           account.account_status === 'Active' &&
           String(account.account_id) !== String(newAccount?.account_id)
       )
 
-      if (
-        newAccount &&
-        window.confirm(
-          'Account created with zero balance. Do you want to transfer money into this new account now?'
-        )
-      ) {
-        if (hasOtherActiveSource) {
-          setTransferForm((current) => ({
-            ...current,
-            sender_account_id:
-              String(
-                dashboard?.accounts?.find(
-                  (account) =>
-                    account.account_status === 'Active' &&
-                    String(account.account_id) !== String(newAccount.account_id)
-                )?.account_id || ''
-              ),
-            destination_account_number: newAccount.account_number || '',
-            transfer_amount: '',
-            transfer_remarks: `Initial funding for ${newAccount.account_number}`,
-            password: '',
-          }))
-
-          window.alert('The transfer form has been prepared below in the Accounts tab.')
-        } else {
-          window.alert('No other active account is available to fund this new account yet.')
-        }
+      if (newAccount && sourceAccount) {
+        openAccountCreationModal({
+          title: 'Fund this new account now?',
+          description:
+            'The new account starts at zero balance. Would you like me to prepare the own-account transfer form for it now?',
+          confirmLabel: 'Prepare Transfer',
+          cancelLabel: 'Not Now',
+          showCancel: true,
+          onConfirm: () => {
+            setTransferForm((current) => ({
+              ...current,
+              sender_account_id: String(sourceAccount.account_id || ''),
+              destination_account_number: newAccount.account_number || '',
+              transfer_amount: '',
+              transfer_remarks: `Initial funding for ${newAccount.account_number}`,
+            }))
+          },
+        })
+      } else if (newAccount) {
+        openAccountCreationModal({
+          title: 'Account created',
+          description:
+            'The account was created successfully, but there is no other active account available to fund it right now.',
+          confirmLabel: 'Close',
+          showCancel: false,
+          onConfirm: null,
+        })
       }
     } catch (requestError) {
       setError(
@@ -481,6 +500,60 @@ export function useCustomerDashboard() {
     }))
   }
 
+  const openPasswordModal = ({ title, description, confirmLabel }) => {
+    setPasswordModal({
+      isOpen: true,
+      title,
+      description,
+      confirmLabel,
+      password: '',
+    })
+  }
+
+  const closePasswordModal = () => {
+    setPasswordModal(initialPasswordModalState)
+  }
+
+  const openAccountCreationModal = ({
+    title,
+    description,
+    confirmLabel = 'Close',
+    cancelLabel = 'Cancel',
+    showCancel = false,
+    onConfirm,
+  }) => {
+    setAccountCreationModal({
+      isOpen: true,
+      title,
+      description,
+      confirmLabel,
+      cancelLabel,
+      showCancel,
+      onConfirm,
+    })
+  }
+
+  const closeAccountCreationModal = () => {
+    setAccountCreationModal(initialAccountCreationModalState)
+  }
+
+  const handleAccountCreationModalConfirm = () => {
+    const confirmAction = accountCreationModal.onConfirm
+
+    if (confirmAction) {
+      confirmAction()
+    }
+
+    closeAccountCreationModal()
+  }
+
+  const handlePasswordChange = (value) => {
+    setPasswordModal((current) => ({
+      ...current,
+      password: value,
+    }))
+  }
+
   const prepareOwnAccountTransfer = (destinationAccountNumber, destinationAccountId = '') => {
     const accounts = dashboard?.accounts || []
     const sourceAccount = accounts.find(
@@ -498,12 +571,10 @@ export function useCustomerDashboard() {
         destinationAccountNumber && current.destination_account_number !== destinationAccountNumber
           ? `Transfer to ${destinationAccountNumber}`
           : current.transfer_remarks,
-      password: '',
     }))
   }
 
-  const handleTransferSubmit = async (event) => {
-    event.preventDefault()
+  const submitTransfer = async (confirmPassword) => {
     setIsSubmittingTransfer(true)
     setError('')
     setSuccess('')
@@ -520,7 +591,7 @@ export function useCustomerDashboard() {
           destination_account_number: transferForm.destination_account_number,
           transfer_amount: transferForm.transfer_amount === '' ? 0 : Number(transferForm.transfer_amount),
           transfer_remarks: transferForm.transfer_remarks,
-          password: transferForm.password,
+          password: confirmPassword,
         }),
       })
 
@@ -536,19 +607,42 @@ export function useCustomerDashboard() {
         destination_account_number: '',
         transfer_amount: '',
         transfer_remarks: '',
-        password: '',
       }))
       await loadDashboard()
-      window.alert(data.message || 'Transfer successful.')
+      return true
     } catch (requestError) {
       setError(
         requestError instanceof Error
           ? requestError.message
           : 'Something went wrong while submitting transfer.'
       )
+      return false
     } finally {
       setIsSubmittingTransfer(false)
     }
+  }
+
+  const handlePasswordModalConfirm = async () => {
+    if (!passwordModal.password.trim()) {
+      setError('Password confirmation is required to continue.')
+      return
+    }
+
+    const didSucceed = await submitTransfer(passwordModal.password)
+
+    if (didSucceed) {
+      closePasswordModal()
+    }
+  }
+
+  const handleTransferSubmit = async (event) => {
+    event.preventDefault()
+    setError('')
+    openPasswordModal({
+      title: 'Confirm transfer',
+      description: 'Enter your customer password to authorize this transfer.',
+      confirmLabel: 'Transfer Money',
+    })
   }
 
   const handleLoanApplicationFormChange = (event) => {
@@ -685,6 +779,8 @@ export function useCustomerDashboard() {
     isSubmittingTransfer,
     isSubmittingLoanApplication,
     isSubmittingRepayment,
+    passwordModal,
+    accountCreationModal,
     error,
     success,
     storedUser,
@@ -698,6 +794,11 @@ export function useCustomerDashboard() {
     handleTransactionSubmit,
     handleTransferFormChange,
     handleTransferSubmit,
+    handlePasswordChange,
+    handlePasswordModalConfirm,
+    closePasswordModal,
+    handleAccountCreationModalConfirm,
+    closeAccountCreationModal,
     handleLoanApplicationFormChange,
     handleLoanApplicationSubmit,
     handleRepaymentFormChange,

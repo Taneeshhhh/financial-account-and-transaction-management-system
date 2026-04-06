@@ -447,6 +447,8 @@ CREATE TRIGGER trg_flag_high_value_transaction
 AFTER INSERT ON Transactions
 FOR EACH ROW
 BEGIN
+    -- `NEW` is the row that was just inserted into `Transactions`.
+    -- This trigger only logs the event; it does not block the transaction.
     IF NEW.transaction_amount > 50000.00 THEN
         INSERT INTO Fraud_Logs (
             transaction_id,
@@ -481,6 +483,183 @@ BEGIN
     END IF;
 END$$
 
+CREATE TRIGGER trg_flag_rapid_transactions
+AFTER INSERT ON Transactions
+FOR EACH ROW
+BEGIN
+    -- Count recent successful transactions on the same account within 10 minutes.
+    DECLARE txn_count INT DEFAULT 0;
+    DECLARE txn_total DECIMAL(15,2) DEFAULT 0.00;
+    -- Prevent duplicate fraud logs for the same short burst window.
+    DECLARE recent_log_id INT DEFAULT NULL;
+
+    SELECT
+        COUNT(*),
+        COALESCE(SUM(t.transaction_amount), 0.00)
+    INTO txn_count, txn_total
+    FROM Transactions t
+    WHERE t.account_id = NEW.account_id
+      AND t.transaction_status = 'Success'
+      AND t.transaction_date >= DATE_SUB(NEW.transaction_date, INTERVAL 10 MINUTE);
+
+    SELECT fl.fraud_log_id
+    INTO recent_log_id
+    FROM Fraud_Logs fl
+    WHERE fl.account_id = NEW.account_id
+      AND fl.fraud_category = 'Rapid Transactions'
+      AND fl.detected_at >= DATE_SUB(NEW.transaction_date, INTERVAL 10 MINUTE)
+    ORDER BY fl.detected_at DESC
+    LIMIT 1;
+
+    -- Fraud is logged only when both count and total amount cross the threshold.
+    IF txn_count >= 4 AND txn_total >= 40000.00 AND recent_log_id IS NULL THEN
+        INSERT INTO Fraud_Logs (
+            transaction_id,
+            transfer_id,
+            account_id,
+            fraud_category,
+            risk_score,
+            fraud_severity,
+            fraud_description,
+            is_confirmed_fraud,
+            action_taken,
+            detected_at
+        ) VALUES (
+            NEW.transaction_id,
+            NULL,
+            NEW.account_id,
+            'Rapid Transactions',
+            78,
+            'High',
+            CONCAT(
+                'Auto-flagged: ',
+                txn_count,
+                ' successful transactions worth INR ',
+                FORMAT(txn_total, 2),
+                ' were detected within 10 minutes on account_id ',
+                NEW.account_id,
+                '.'
+            ),
+            0,
+            'Under Review',
+            NOW()
+        );
+    END IF;
+END$$
+
+CREATE TRIGGER trg_flag_card_skimming_pattern
+AFTER INSERT ON Transactions
+FOR EACH ROW
+BEGIN
+    -- Look only at debit activity through ATM/POS channels because that best fits skimming patterns.
+    DECLARE suspicious_card_count INT DEFAULT 0;
+    DECLARE suspicious_card_total DECIMAL(15,2) DEFAULT 0.00;
+    DECLARE recent_log_id INT DEFAULT NULL;
+
+    IF NEW.transaction_type = 'Debit'
+       AND NEW.transaction_channel IN ('POS Terminal', 'ATM') THEN
+        -- Count clustered card-like debits in the last 15 minutes.
+        SELECT
+            COUNT(*),
+            COALESCE(SUM(t.transaction_amount), 0.00)
+        INTO suspicious_card_count, suspicious_card_total
+        FROM Transactions t
+        WHERE t.account_id = NEW.account_id
+          AND t.transaction_status = 'Success'
+          AND t.transaction_type = 'Debit'
+          AND t.transaction_channel IN ('POS Terminal', 'ATM')
+          AND t.transaction_date >= DATE_SUB(NEW.transaction_date, INTERVAL 15 MINUTE);
+
+        -- Skip creating another skimming log if one was already raised very recently.
+        SELECT fl.fraud_log_id
+        INTO recent_log_id
+        FROM Fraud_Logs fl
+        WHERE fl.account_id = NEW.account_id
+          AND fl.fraud_category = 'Card Skimming'
+          AND fl.detected_at >= DATE_SUB(NEW.transaction_date, INTERVAL 15 MINUTE)
+        ORDER BY fl.detected_at DESC
+        LIMIT 1;
+
+        -- If there are at least 3 suspicious debits and the total is large enough, flag it.
+        IF suspicious_card_count >= 3
+           AND suspicious_card_total >= 20000.00
+           AND recent_log_id IS NULL THEN
+            INSERT INTO Fraud_Logs (
+                transaction_id,
+                transfer_id,
+                account_id,
+                fraud_category,
+                risk_score,
+                fraud_severity,
+                fraud_description,
+                is_confirmed_fraud,
+                action_taken,
+                detected_at
+            ) VALUES (
+                NEW.transaction_id,
+                NULL,
+                NEW.account_id,
+                'Card Skimming',
+                88,
+                'Critical',
+                CONCAT(
+                    'Auto-flagged: ',
+                    suspicious_card_count,
+                    ' clustered debit transactions worth INR ',
+                    FORMAT(suspicious_card_total, 2),
+                    ' through ',
+                    NEW.transaction_channel,
+                    ' indicate possible card skimming on account_id ',
+                    NEW.account_id,
+                    '.'
+                ),
+                0,
+                'Blocked',
+                NOW()
+            );
+        END IF;
+    END IF;
+END$$
+
+CREATE TRIGGER trg_flag_unusual_location_transaction
+AFTER INSERT ON Transactions
+FOR EACH ROW
+BEGIN
+    -- The current schema has no latitude/longitude or country column,
+    -- so this trigger infers location risk from keywords in the transaction description.
+    IF LOWER(COALESCE(NEW.transaction_desc, '')) REGEXP 'international|foreign|overseas|dubai|uae|singapore|london|uk|usa|new york|sydney' THEN
+        INSERT INTO Fraud_Logs (
+            transaction_id,
+            transfer_id,
+            account_id,
+            fraud_category,
+            risk_score,
+            fraud_severity,
+            fraud_description,
+            is_confirmed_fraud,
+            action_taken,
+            detected_at
+        ) VALUES (
+            NEW.transaction_id,
+            NULL,
+            NEW.account_id,
+            'Unusual Location',
+            60,
+            'Medium',
+            CONCAT(
+                'Auto-flagged: transaction description references an unusual or overseas location [',
+                NEW.transaction_desc,
+                '] for account_id ',
+                NEW.account_id,
+                '.'
+            ),
+            0,
+            'Flagged',
+            NOW()
+        );
+    END IF;
+END$$
+
 
 -- ────────────────────────────────────────────────────────────────
 --  TRIGGER 2 : Prevent self-transfer — BEFORE INSERT
@@ -491,6 +670,7 @@ CREATE TRIGGER trg_transfers_no_self_insert
 BEFORE INSERT ON Transfers
 FOR EACH ROW
 BEGIN
+    -- BEFORE trigger stops bad data before it enters the table.
     IF NEW.sender_account_id = NEW.receiver_account_id THEN
         SIGNAL SQLSTATE '45000'
             SET MESSAGE_TEXT = 'Transfer rejected: sender and receiver account must be different.';
@@ -506,9 +686,122 @@ CREATE TRIGGER trg_transfers_no_self_update
 BEFORE UPDATE ON Transfers
 FOR EACH ROW
 BEGIN
+    -- Same protection during updates so an existing transfer cannot be changed into a self-transfer.
     IF NEW.sender_account_id = NEW.receiver_account_id THEN
         SIGNAL SQLSTATE '45000'
             SET MESSAGE_TEXT = 'Transfer rejected: sender and receiver account must be different.';
+    END IF;
+END$$
+
+CREATE TRIGGER trg_flag_suspicious_transfer
+AFTER INSERT ON Transfers
+FOR EACH ROW
+BEGIN
+    -- Build the effective event time first because some rows may rely on `initiated_at`
+    -- while completed transfers can also use `completed_at`.
+    DECLARE event_hour INT DEFAULT 0;
+    DECLARE effective_time DATETIME;
+
+    SET effective_time = COALESCE(NEW.completed_at, NEW.initiated_at);
+    SET event_hour = HOUR(effective_time);
+
+    -- Flag large transfers, odd-hour transfers, or transfers with no useful remarks.
+    IF NEW.transfer_status = 'Success'
+       AND (
+            NEW.transfer_amount >= 100000.00
+            OR event_hour BETWEEN 0 AND 4
+            OR CHAR_LENGTH(TRIM(COALESCE(NEW.transfer_remarks, ''))) = 0
+       ) THEN
+        INSERT INTO Fraud_Logs (
+            transaction_id,
+            transfer_id,
+            account_id,
+            fraud_category,
+            risk_score,
+            fraud_severity,
+            fraud_description,
+            is_confirmed_fraud,
+            action_taken,
+            detected_at
+        ) VALUES (
+            NULL,
+            NEW.transfer_id,
+            NEW.sender_account_id,
+            'Suspicious Transfer',
+            82,
+            'High',
+            CONCAT(
+                'Auto-flagged: transfer INR ',
+                FORMAT(NEW.transfer_amount, 2),
+                ' from account_id ',
+                NEW.sender_account_id,
+                ' to account_id ',
+                NEW.receiver_account_id,
+                ' via ',
+                NEW.transfer_mode,
+                ' matched suspicious-transfer rules.'
+            ),
+            0,
+            'Under Review',
+            NOW()
+        );
+    END IF;
+END$$
+
+CREATE TRIGGER trg_flag_round_tripping
+AFTER INSERT ON Transfers
+FOR EACH ROW
+BEGIN
+    -- Search for a recent reverse transfer between the same two accounts.
+    DECLARE reverse_transfer_id INT DEFAULT NULL;
+    DECLARE reverse_amount DECIMAL(15,2) DEFAULT 0.00;
+
+    SELECT
+        t.transfer_id,
+        t.transfer_amount
+    INTO reverse_transfer_id, reverse_amount
+    FROM Transfers t
+    WHERE t.sender_account_id = NEW.receiver_account_id
+      AND t.receiver_account_id = NEW.sender_account_id
+      AND t.transfer_status = 'Success'
+      AND t.transfer_id <> NEW.transfer_id
+      AND COALESCE(t.completed_at, t.initiated_at) >= DATE_SUB(COALESCE(NEW.completed_at, NEW.initiated_at), INTERVAL 30 MINUTE)
+      AND COALESCE(t.completed_at, t.initiated_at) <= COALESCE(NEW.completed_at, NEW.initiated_at)
+    ORDER BY COALESCE(t.completed_at, t.initiated_at) DESC
+    LIMIT 1;
+
+    -- A near-equal reverse transfer within 30 minutes is treated as a round-tripping signal.
+    IF reverse_transfer_id IS NOT NULL
+       AND NEW.transfer_amount >= reverse_amount * 0.90 THEN
+        INSERT INTO Fraud_Logs (
+            transaction_id,
+            transfer_id,
+            account_id,
+            fraud_category,
+            risk_score,
+            fraud_severity,
+            fraud_description,
+            is_confirmed_fraud,
+            action_taken,
+            detected_at
+        ) VALUES (
+            NULL,
+            NEW.transfer_id,
+            NEW.sender_account_id,
+            'Round-Tripping',
+            92,
+            'Critical',
+            CONCAT(
+                'Auto-flagged: transfer_id ',
+                NEW.transfer_id,
+                ' appears to reverse transfer_id ',
+                reverse_transfer_id,
+                ' within 30 minutes, indicating round-tripping.'
+            ),
+            0,
+            'Reported to RBI',
+            NOW()
+        );
     END IF;
 END$$
 

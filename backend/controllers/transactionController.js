@@ -13,6 +13,7 @@ const TRANSACTION_CHANNELS = [
     'RTGS',
     'IMPS',
 ];
+const MAX_SELF_SERVICE_TRANSACTION_AMOUNT = 50000;
 
 const generateReferenceNumber = () =>
     `TXN${Date.now()}${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
@@ -115,6 +116,12 @@ exports.createMyTransaction = async (req, res) => {
     if (!Number.isFinite(amount) || amount <= 0) {
         return res.status(400).json({
             message: 'transaction_amount must be a valid number greater than zero.',
+        });
+    }
+
+    if (amount > MAX_SELF_SERVICE_TRANSACTION_AMOUNT) {
+        return res.status(403).json({
+            message: `Transactions above INR ${MAX_SELF_SERVICE_TRANSACTION_AMOUNT.toLocaleString('en-IN')} are blocked in one go. Please use a branch-assisted process.`,
         });
     }
 

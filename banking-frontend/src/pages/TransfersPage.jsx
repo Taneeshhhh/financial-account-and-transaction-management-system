@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import PasswordConfirmationModal from '../components/PasswordConfirmationModal.jsx'
 import CustomerDashboardLayout from '../components/CustomerDashboardLayout.jsx'
 import { formatCurrency, formatDate, useCustomerDashboard } from '../dashboard/customerDashboard.js'
 
@@ -7,6 +8,7 @@ function TransfersPage() {
     dashboard,
     isLoading,
     isSubmittingTransfer,
+    passwordModal,
     error,
     success,
     storedUser,
@@ -14,6 +16,9 @@ function TransfersPage() {
     transferForm,
     handleTransferFormChange,
     handleTransferSubmit,
+    handlePasswordChange,
+    handlePasswordModalConfirm,
+    closePasswordModal,
   } = useCustomerDashboard()
 
   const transfers = dashboard?.recent_transfers || []
@@ -41,7 +46,7 @@ function TransfersPage() {
       isLoading={isLoading}
       onLogout={handleLogout}
       title="Transfers Activity"
-      description="Move money between accounts with password confirmation. Successful transfers update the Transfers table, create matching debit and credit transaction rows, and refresh both account balances atomically."
+      description="Move money between accounts with a secure confirmation modal. Successful transfers update the Transfers table, create matching debit and credit transaction rows, and refresh both account balances atomically."
       actions={
         <>
           <Link className="button-link button-link--primary" to="/dashboard/transactions">
@@ -130,17 +135,6 @@ function TransfersPage() {
                     placeholder="0.00"
                   />
                 </label>
-                <label className="field-group">
-                  <span>Password</span>
-                  <input
-                    name="password"
-                    type="password"
-                    value={transferForm.password}
-                    onChange={handleTransferFormChange}
-                    disabled={isSubmittingTransfer}
-                    placeholder="Confirm your password"
-                  />
-                </label>
               </div>
               <label className="field-group">
                 <span>Description</span>
@@ -172,6 +166,9 @@ function TransfersPage() {
                   This account is {senderAccount.account_status.toLowerCase()}, so outgoing transfers are blocked.
                 </p>
               ) : null}
+              <p className="auth-helper auth-helper--muted">
+                You will confirm this transfer in a secure password modal before it is submitted.
+              </p>
               <button
                 type="submit"
                 className="button-link button-link--primary auth-submit"
@@ -241,6 +238,18 @@ function TransfersPage() {
           </article>
         </div>
       </div>
+
+      <PasswordConfirmationModal
+        isOpen={passwordModal.isOpen}
+        title={passwordModal.title}
+        description={passwordModal.description}
+        password={passwordModal.password}
+        onPasswordChange={handlePasswordChange}
+        onClose={closePasswordModal}
+        onConfirm={handlePasswordModalConfirm}
+        confirmLabel={passwordModal.confirmLabel}
+        isSubmitting={isSubmittingTransfer}
+      />
     </CustomerDashboardLayout>
   )
 }

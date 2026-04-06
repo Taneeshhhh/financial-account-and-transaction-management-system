@@ -1,4 +1,6 @@
 import { Link } from 'react-router-dom'
+import AppModal from '../components/AppModal.jsx'
+import PasswordConfirmationModal from '../components/PasswordConfirmationModal.jsx'
 import CustomerDashboardLayout from '../components/CustomerDashboardLayout.jsx'
 import {
   accountStatusOptions,
@@ -15,6 +17,8 @@ function AccountsPage() {
     isCreatingAccount,
     isUpdatingAccountStatus,
     isSubmittingTransfer,
+    passwordModal,
+    accountCreationModal,
     error,
     success,
     storedUser,
@@ -26,6 +30,11 @@ function AccountsPage() {
     handleAccountStatusChange,
     handleTransferFormChange,
     handleTransferSubmit,
+    handlePasswordChange,
+    handlePasswordModalConfirm,
+    closePasswordModal,
+    handleAccountCreationModalConfirm,
+    closeAccountCreationModal,
   } = useCustomerDashboard()
 
   const accounts = dashboard?.accounts || []
@@ -252,17 +261,6 @@ function AccountsPage() {
                     placeholder="0.00"
                   />
                 </label>
-                <label className="field-group">
-                  <span>Password</span>
-                  <input
-                    name="password"
-                    type="password"
-                    value={transferForm.password}
-                    onChange={handleTransferFormChange}
-                    disabled={isSubmittingTransfer}
-                    placeholder="Confirm your password"
-                  />
-                </label>
               </div>
               <label className="field-group">
                 <span>Description</span>
@@ -289,6 +287,9 @@ function AccountsPage() {
                   <p>{destinationAccount?.account_status || 'Select a destination account'}</p>
                 </div>
               </div>
+              <p className="auth-helper auth-helper--muted">
+                You will confirm this transfer in a secure password modal before it is submitted.
+              </p>
               <button
                 type="submit"
                 className="button-link button-link--primary auth-submit"
@@ -362,6 +363,30 @@ function AccountsPage() {
           </article>
         </div>
       </div>
+
+      <PasswordConfirmationModal
+        isOpen={passwordModal.isOpen}
+        title={passwordModal.title}
+        description={passwordModal.description}
+        password={passwordModal.password}
+        onPasswordChange={handlePasswordChange}
+        onClose={closePasswordModal}
+        onConfirm={handlePasswordModalConfirm}
+        confirmLabel={passwordModal.confirmLabel}
+        isSubmitting={isSubmittingTransfer}
+      />
+
+      <AppModal
+        isOpen={accountCreationModal.isOpen}
+        eyebrow="Account Setup"
+        title={accountCreationModal.title}
+        description={accountCreationModal.description}
+        confirmLabel={accountCreationModal.confirmLabel}
+        cancelLabel={accountCreationModal.cancelLabel}
+        showCancel={accountCreationModal.showCancel}
+        onConfirm={handleAccountCreationModalConfirm}
+        onClose={closeAccountCreationModal}
+      />
     </CustomerDashboardLayout>
   )
 }

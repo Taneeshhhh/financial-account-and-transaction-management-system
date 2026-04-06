@@ -4,6 +4,7 @@ const dbPromise = db.promise();
 
 const TRANSFER_MODE = 'Internal';
 const TRANSACTION_CHANNEL = 'Online Banking';
+const MAX_SELF_SERVICE_TRANSFER_AMOUNT = 50000;
 
 const generateReference = (prefix) =>
     `${prefix}${Date.now()}${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
@@ -35,6 +36,12 @@ exports.createMyTransfer = async (req, res) => {
     if (!Number.isFinite(transferAmount) || transferAmount <= 0) {
         return res.status(400).json({
             message: 'transfer_amount must be a valid number greater than zero.',
+        });
+    }
+
+    if (transferAmount > MAX_SELF_SERVICE_TRANSFER_AMOUNT) {
+        return res.status(403).json({
+            message: `Transfers above INR ${MAX_SELF_SERVICE_TRANSFER_AMOUNT.toLocaleString('en-IN')} are blocked in one go. Please contact your branch.`,
         });
     }
 
