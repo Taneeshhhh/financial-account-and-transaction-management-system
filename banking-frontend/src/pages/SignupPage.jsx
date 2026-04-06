@@ -1,9 +1,13 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import BrandLogo from '../components/BrandLogo.jsx'
+import ThemeToggle from '../components/ThemeToggle.jsx'
 import { apiBaseUrl } from '../config/api'
+import { useTheme } from '../context/ThemeContext.jsx'
 
 function SignupPage() {
   const navigate = useNavigate()
+  const { theme, toggleTheme } = useTheme()
   const [role, setRole] = useState('customer')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -131,12 +135,32 @@ function SignupPage() {
     <main className="app-shell">
       <section className="page-columns">
         <article className="hero-card">
+          <BrandLogo
+            label="BlueCrest Bank"
+            sublabel={role === 'customer' ? 'Customer Onboarding' : 'Staff Onboarding'}
+            admin={role === 'admin'}
+          />
           <p className="hero-card__eyebrow">Signup</p>
-          <h1>Create a new account for banking access.</h1>
+          <h1>Create customer and staff access with a cleaner onboarding flow.</h1>
           <p className="hero-card__text">
-            Choose whether you are signing up as a customer or an admin. The form
-            writes to the main schema table and the matching login table.
+            Choose a role, complete the required fields, and generate the linked
+            application and login records in one streamlined flow.
           </p>
+
+          <div className="hero-stat-grid" aria-label="Signup workflow highlights">
+            <div className="hero-stat">
+              <strong>Dual</strong>
+              <span>Customer and admin onboarding</span>
+            </div>
+            <div className="hero-stat">
+              <strong>Schema</strong>
+              <span>Aligned with your database tables</span>
+            </div>
+            <div className="hero-stat">
+              <strong>Ready</strong>
+              <span>Immediate redirect after signup</span>
+            </div>
+          </div>
 
           <div className="hero-card__actions">
             <Link className="button-link button-link--primary" to="/">
@@ -146,11 +170,33 @@ function SignupPage() {
               Admin Login
             </Link>
           </div>
+
+          <div className="hero-list">
+            <div className="hero-list__item">
+              <div className="hero-list__icon">01</div>
+              <div>
+                <strong>Customer onboarding</strong>
+                <p>Capture KYC-ready identity, contact, and address information in one form.</p>
+              </div>
+            </div>
+            <div className="hero-list__item">
+              <div className="hero-list__icon">02</div>
+              <div>
+                <strong>Staff onboarding</strong>
+                <p>Register branch-linked admin users with role and operational access details.</p>
+              </div>
+            </div>
+          </div>
         </article>
 
         <aside className="form-card">
-          <h2>Signup Page</h2>
-          <p>Complete the fields required by your database schema.</p>
+          <div className="auth-card__topbar">
+            <div>
+          <h2>Create Account</h2>
+          <p>Complete the role-specific fields required by your database schema.</p>
+            </div>
+            <ThemeToggle theme={theme} onToggle={toggleTheme} />
+          </div>
 
           <div className="role-switch">
             <button
@@ -167,6 +213,13 @@ function SignupPage() {
             >
               Admin
             </button>
+          </div>
+
+          <div className="auth-meta">
+            <span className="auth-meta__pill">
+              {role === 'customer' ? 'Customer profile' : 'Admin profile'}
+            </span>
+            <span className="auth-meta__pill">Database-backed</span>
           </div>
 
           <form className="auth-form" onSubmit={handleSubmit}>

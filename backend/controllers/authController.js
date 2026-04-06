@@ -94,6 +94,25 @@ const recordLoginAttempt = async ({
     }
 };
 
+const recordLoginAttemptSafely = async (details) => {
+    try {
+        await recordLoginAttempt(details);
+    } catch (error) {
+        console.warn('LOGIN ATTEMPT AUDIT WARNING:', error.message);
+    }
+};
+
+const updateLastLoginSafely = async (tableName, idColumn, idValue) => {
+    try {
+        await dbPromise.query(
+            `UPDATE ${tableName} SET last_login = NOW() WHERE ${idColumn} = ?`,
+            [idValue]
+        );
+    } catch (error) {
+        console.warn('LAST LOGIN UPDATE WARNING:', error.message);
+    }
+};
+
 exports.signup = (req, res) => {
     const payload = req.body || {};
     const role = payload.role;
@@ -349,7 +368,7 @@ exports.login = async (req, res) => {
         );
 
         if (!user) {
-            await recordLoginAttempt({
+            await recordLoginAttemptSafely({
                 customerId: customerRecord?.customer_id || null,
                 loginRole: 'customer',
                 loginIdentifier: identifier,
@@ -367,7 +386,7 @@ exports.login = async (req, res) => {
             });
         }
 
-        await recordLoginAttempt({
+        await recordLoginAttemptSafely({
             customerId: user.customer_id,
             loginRole: 'customer',
             loginIdentifier: identifier,
@@ -375,9 +394,10 @@ exports.login = async (req, res) => {
             attemptStatus: 'Success',
         });
 
-        await dbPromise.query(
-            'UPDATE customer_Login SET last_login = NOW() WHERE customer_login_id = ?',
-            [user.customer_login_id]
+        await updateLastLoginSafely(
+            'customer_Login',
+            'customer_login_id',
+            user.customer_login_id
         );
 
         const token = signJwt(
@@ -456,7 +476,7 @@ exports.adminLogin = async (req, res) => {
         );
 
         if (!admin) {
-            await recordLoginAttempt({
+            await recordLoginAttemptSafely({
                 accountantId: adminRecord?.accountant_id || null,
                 loginRole: 'admin',
                 loginIdentifier: identifier,
@@ -474,7 +494,7 @@ exports.adminLogin = async (req, res) => {
             });
         }
 
-        await recordLoginAttempt({
+        await recordLoginAttemptSafely({
             accountantId: admin.accountant_id,
             loginRole: 'admin',
             loginIdentifier: identifier,
@@ -482,9 +502,10 @@ exports.adminLogin = async (req, res) => {
             attemptStatus: 'Success',
         });
 
-        await dbPromise.query(
-            'UPDATE admin_Login SET last_login = NOW() WHERE admin_login_id = ?',
-            [admin.admin_login_id]
+        await updateLastLoginSafely(
+            'admin_Login',
+            'admin_login_id',
+            admin.admin_login_id
         );
 
         const token = signJwt(

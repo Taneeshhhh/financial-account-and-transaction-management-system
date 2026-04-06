@@ -3,294 +3,271 @@ const db = require('../config/db');
 const dbPromise = db.promise();
 
 const TRANSFER_MODE = 'Internal';
-const TRANSACTION_CHANNEL = 'Online Banking';
 const MAX_SELF_SERVICE_TRANSFER_AMOUNT = 50000;
 
-const generateReference = (prefix) =>
-    `${prefix}${Date.now()}${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
+const validateTransferInput = ({
+    senderAccountId,
+    destinationAccountNumber,
+    transferRemarks,
+    password,
+    transferAmount,
+}) => {
+    if (!Number.isInteger(senderAccountId)) {
+        return 'A valid sender_account_id is required.';
+    }
+
+    if (!destinationAccountNumber) {
+        return 'destination_account_number is required.';
+    }
+
+    if (!transferRemarks) {
+        return 'transfer_remarks is required.';
+    }
+
+    if (!password) {
+        return 'Password confirmation is required.';
+    }
+
+    if (!Number.isFinite(transferAmount) || transferAmount <= 0) {
+        return 'transfer_amount must be a valid number greater than zero.';
+    }
+
+    if (transferAmount > MAX_SELF_SERVICE_TRANSFER_AMOUNT) {
+        return `Transfers above INR ${MAX_SELF_SERVICE_TRANSFER_AMOUNT.toLocaleString('en-IN')} are blocked in one go. Please contact your branch.`;
+    }
+
+    return null;
+};
+
+const loadTransferContext = async ({
+    connection,
+    customerId,
+    senderAccountId,
+    destinationAccountNumber,
+    password,
+}) => {
+    const [loginRows] = await connection.query(
+        `
+            SELECT customer_login_id
+            FROM Customer_Login
+            WHERE customer_id = ?
+              AND password_hash = SHA2(?, 256)
+              AND is_active = 1
+            LIMIT 1
+        `,
+        [customerId, password]
+    );
+
+    if (!loginRows[0]) {
+        return { status: 401, message: 'Password verification failed.' };
+    }
+
+    const [senderRows] = await connection.query(
+        `
+            SELECT
+                account_id,
+                account_number,
+                account_balance,
+                account_currency,
+                account_status
+            FROM Accounts
+            WHERE account_id = ?
+              AND customer_id = ?
+            LIMIT 1
+        `,
+        [senderAccountId, customerId]
+    );
+
+    const senderAccount = senderRows[0];
+
+    if (!senderAccount) {
+        return {
+            status: 404,
+            message: 'Sender account was not found for this customer.',
+        };
+    }
+
+    const [receiverRows] = await connection.query(
+        `
+            SELECT
+                account_id,
+                account_number,
+                account_balance,
+                account_currency,
+                account_status
+            FROM Accounts
+            WHERE account_number = ?
+            LIMIT 1
+        `,
+        [destinationAccountNumber]
+    );
+
+    const receiverAccount = receiverRows[0];
+
+    if (!receiverAccount) {
+        return {
+            status: 404,
+            message: 'Destination account number was not found.',
+        };
+    }
+
+    if (senderAccount.account_id === receiverAccount.account_id) {
+        return {
+            status: 400,
+            message: 'You cannot transfer money to the same account.',
+        };
+    }
+
+    if (senderAccount.account_status !== 'Active') {
+        return {
+            status: 403,
+            message: `Transfers are not allowed while the sender account is ${senderAccount.account_status}.`,
+        };
+    }
+
+    if (receiverAccount.account_status !== 'Active') {
+        return {
+            status: 403,
+            message: `Transfers are not allowed to an account that is ${receiverAccount.account_status}.`,
+        };
+    }
+
+    return {
+        status: 200,
+        senderAccount,
+        receiverAccount,
+    };
+};
+
+const callTransferProcedure = async ({
+    connection,
+    senderAccountId,
+    receiverAccountId,
+    transferAmount,
+    transferRemarks,
+}) => {
+    await connection.query(
+        `
+            CALL sp_transfer_money(
+                ?, ?, ?, ?, ?,
+                @p_transfer_id,
+                @p_transfer_reference,
+                @p_debit_reference,
+                @p_credit_reference
+            )
+        `,
+        [
+            senderAccountId,
+            receiverAccountId,
+            transferAmount,
+            TRANSFER_MODE,
+            transferRemarks,
+        ]
+    );
+
+    const [[procedureOutput]] = await connection.query(
+        `
+            SELECT
+                @p_transfer_id AS transfer_id,
+                @p_transfer_reference AS reference_number,
+                @p_debit_reference AS debit_transaction_reference,
+                @p_credit_reference AS credit_transaction_reference
+        `
+    );
+
+    return procedureOutput;
+};
 
 exports.createMyTransfer = async (req, res) => {
     const customerId = req.user.customer_id;
     const senderAccountId = Number(req.body?.sender_account_id);
-    const destinationAccountNumber = (req.body?.destination_account_number || '').trim();
-    const transferRemarks = (req.body?.transfer_remarks || '').trim();
+    const destinationAccountNumber = String(req.body?.destination_account_number || '').trim();
+    const transferRemarks = String(req.body?.transfer_remarks || '').trim();
     const password = req.body?.password || '';
     const transferAmount = Number(req.body?.transfer_amount || 0);
 
-    if (!Number.isInteger(senderAccountId)) {
-        return res.status(400).json({ message: 'A valid sender_account_id is required.' });
-    }
+    const validationMessage = validateTransferInput({
+        senderAccountId,
+        destinationAccountNumber,
+        transferRemarks,
+        password,
+        transferAmount,
+    });
 
-    if (!destinationAccountNumber) {
-        return res.status(400).json({ message: 'destination_account_number is required.' });
-    }
-
-    if (!transferRemarks) {
-        return res.status(400).json({ message: 'transfer_remarks is required.' });
-    }
-
-    if (!password) {
-        return res.status(400).json({ message: 'Password confirmation is required.' });
-    }
-
-    if (!Number.isFinite(transferAmount) || transferAmount <= 0) {
-        return res.status(400).json({
-            message: 'transfer_amount must be a valid number greater than zero.',
+    if (validationMessage) {
+        return res.status(validationMessage.startsWith('Transfers above INR') ? 403 : 400).json({
+            message: validationMessage,
         });
     }
 
-    if (transferAmount > MAX_SELF_SERVICE_TRANSFER_AMOUNT) {
-        return res.status(403).json({
-            message: `Transfers above INR ${MAX_SELF_SERVICE_TRANSFER_AMOUNT.toLocaleString('en-IN')} are blocked in one go. Please contact your branch.`,
-        });
-    }
+    let connection;
 
     try {
-        await dbPromise.beginTransaction();
+        connection = await dbPromise.getConnection();
 
-        const [loginRows] = await dbPromise.query(
-            `
-                SELECT customer_login_id
-                FROM Customer_Login
-                WHERE customer_id = ?
-                  AND password_hash = SHA2(?, 256)
-                  AND is_active = 1
-                LIMIT 1
-            `,
-            [customerId, password]
-        );
+        const transferContext = await loadTransferContext({
+            connection,
+            customerId,
+            senderAccountId,
+            destinationAccountNumber,
+            password,
+        });
 
-        if (!loginRows[0]) {
-            await dbPromise.rollback();
-            return res.status(401).json({
-                message: 'Password verification failed.',
+        if (transferContext.status !== 200) {
+            return res.status(transferContext.status).json({
+                message: transferContext.message,
             });
         }
 
-        const [senderRows] = await dbPromise.query(
-            `
-                SELECT
-                    account_id,
-                    account_number,
-                    account_balance,
-                    account_currency,
-                    account_status
-                FROM Accounts
-                WHERE account_id = ?
-                  AND customer_id = ?
-                FOR UPDATE
-            `,
-            [senderAccountId, customerId]
-        );
-
-        const senderAccount = senderRows[0];
-
-        if (!senderAccount) {
-            await dbPromise.rollback();
-            return res.status(404).json({
-                message: 'Sender account was not found for this customer.',
-            });
-        }
-
-        const [receiverRows] = await dbPromise.query(
-            `
-                SELECT
-                    account_id,
-                    account_number,
-                    account_balance,
-                    account_currency,
-                    account_status
-                FROM Accounts
-                WHERE account_number = ?
-                FOR UPDATE
-            `,
-            [destinationAccountNumber]
-        );
-
-        const receiverAccount = receiverRows[0];
-
-        if (!receiverAccount) {
-            await dbPromise.rollback();
-            return res.status(404).json({
-                message: 'Destination account number was not found.',
-            });
-        }
-
-        if (senderAccount.account_id === receiverAccount.account_id) {
-            await dbPromise.rollback();
-            return res.status(400).json({
-                message: 'You cannot transfer money to the same account.',
-            });
-        }
-
-        if (senderAccount.account_status !== 'Active') {
-            await dbPromise.rollback();
-            return res.status(403).json({
-                message: `Transfers are not allowed while the sender account is ${senderAccount.account_status}.`,
-            });
-        }
-
-        if (receiverAccount.account_status !== 'Active') {
-            await dbPromise.rollback();
-            return res.status(403).json({
-                message: `Transfers are not allowed to an account that is ${receiverAccount.account_status}.`,
-            });
-        }
-
-        const senderBalance = Number(senderAccount.account_balance || 0);
-        const receiverBalance = Number(receiverAccount.account_balance || 0);
-
-        if (senderBalance < transferAmount) {
-            await dbPromise.rollback();
+        if (Number(transferContext.senderAccount.account_balance || 0) < transferAmount) {
             return res.status(400).json({
                 message: 'Insufficient balance for this transfer.',
             });
         }
 
-        const senderNextBalance = senderBalance - transferAmount;
-        const receiverNextBalance = receiverBalance + transferAmount;
+        await connection.beginTransaction();
 
-        let transferReference = generateReference('TRF');
-        let transferId = null;
-        let transferCreated = false;
+        const procedureOutput = await callTransferProcedure({
+            connection,
+            senderAccountId: transferContext.senderAccount.account_id,
+            receiverAccountId: transferContext.receiverAccount.account_id,
+            transferAmount,
+            transferRemarks,
+        });
 
-        while (!transferCreated) {
-            try {
-                const [transferResult] = await dbPromise.query(
-                    `
-                        INSERT INTO Transfers (
-                            sender_account_id,
-                            receiver_account_id,
-                            transfer_amount,
-                            transfer_mode,
-                            reference_number,
-                            transfer_remarks,
-                            transfer_status,
-                            completed_at
-                        )
-                        VALUES (?, ?, ?, ?, ?, ?, 'Success', NOW())
-                    `,
-                    [
-                        senderAccount.account_id,
-                        receiverAccount.account_id,
-                        transferAmount,
-                        TRANSFER_MODE,
-                        transferReference,
-                        transferRemarks,
-                    ]
-                );
-
-                transferId = transferResult.insertId;
-                transferCreated = true;
-            } catch (error) {
-                if (error?.code === 'ER_DUP_ENTRY') {
-                    transferReference = generateReference('TRF');
-                    continue;
-                }
-
-                throw error;
-            }
-        }
-
-        await dbPromise.query(
-            `
-                UPDATE Accounts
-                SET account_balance = ?
-                WHERE account_id = ?
-            `,
-            [senderNextBalance, senderAccount.account_id]
-        );
-
-        await dbPromise.query(
-            `
-                UPDATE Accounts
-                SET account_balance = ?
-                WHERE account_id = ?
-            `,
-            [receiverNextBalance, receiverAccount.account_id]
-        );
-
-        const transactionRows = [
-            {
-                accountId: senderAccount.account_id,
-                type: 'Debit',
-                amount: transferAmount,
-                balanceAfter: senderNextBalance,
-                desc: `Transfer to ${receiverAccount.account_number}: ${transferRemarks}`,
-            },
-            {
-                accountId: receiverAccount.account_id,
-                type: 'Credit',
-                amount: transferAmount,
-                balanceAfter: receiverNextBalance,
-                desc: `Transfer from ${senderAccount.account_number}: ${transferRemarks}`,
-            },
-        ];
-
-        for (const transaction of transactionRows) {
-            let transactionReference = generateReference('TXN');
-            let saved = false;
-
-            while (!saved) {
-                try {
-                    await dbPromise.query(
-                        `
-                            INSERT INTO Transactions (
-                                account_id,
-                                transaction_type,
-                                transaction_amount,
-                                balance_after_txn,
-                                transaction_desc,
-                                transaction_channel,
-                                reference_number,
-                                transaction_status
-                            )
-                            VALUES (?, ?, ?, ?, ?, ?, ?, 'Success')
-                        `,
-                        [
-                            transaction.accountId,
-                            transaction.type,
-                            transaction.amount,
-                            transaction.balanceAfter,
-                            transaction.desc,
-                            TRANSACTION_CHANNEL,
-                            transactionReference,
-                        ]
-                    );
-
-                    saved = true;
-                } catch (error) {
-                    if (error?.code === 'ER_DUP_ENTRY') {
-                        transactionReference = generateReference('TXN');
-                        continue;
-                    }
-
-                    throw error;
-                }
-            }
-        }
-
-        await dbPromise.commit();
+        await connection.commit();
 
         return res.status(201).json({
             message: 'Transfer successful.',
             transfer: {
-                transfer_id: transferId,
-                reference_number: transferReference,
-                sender_account_number: senderAccount.account_number,
-                receiver_account_number: receiverAccount.account_number,
+                transfer_id: procedureOutput?.transfer_id || null,
+                reference_number: procedureOutput?.reference_number || null,
+                debit_transaction_reference:
+                    procedureOutput?.debit_transaction_reference || null,
+                credit_transaction_reference:
+                    procedureOutput?.credit_transaction_reference || null,
+                sender_account_number: transferContext.senderAccount.account_number,
+                receiver_account_number: transferContext.receiverAccount.account_number,
                 transfer_amount: transferAmount,
             },
         });
     } catch (error) {
         try {
-            await dbPromise.rollback();
+            await connection?.rollback();
         } catch {
             // Ignore rollback failures and return the original request error response.
+        }
+
+        if (error?.sqlState === '45000' && error?.sqlMessage) {
+            return res.status(400).json({
+                message: error.sqlMessage,
+            });
         }
 
         return res.status(500).json({
             message: 'Failed to complete transfer.',
         });
+    } finally {
+        connection?.release();
     }
 };

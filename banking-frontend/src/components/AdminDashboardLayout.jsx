@@ -1,4 +1,7 @@
 import { getInitials } from '../dashboard/customerDashboard.js'
+import BrandLogo from './BrandLogo.jsx'
+import ThemeToggle from './ThemeToggle.jsx'
+import { useTheme } from '../context/ThemeContext.jsx'
 
 function AdminDashboardLayout({
   dashboard,
@@ -12,13 +15,14 @@ function AdminDashboardLayout({
   children,
 }) {
   const profile = dashboard?.profile
+  const { theme, toggleTheme } = useTheme()
 
   return (
     <main className="dashboard-shell">
       <aside className="dashboard-sidebar dashboard-sidebar--admin">
         <div className="dashboard-sidebar__brand">
           <p className="hero-card__eyebrow">Branch Operations</p>
-          <h2>BlueCrest Admin</h2>
+          <BrandLogo label="BlueCrest Admin" sublabel="Branch Operations" compact admin />
           <span className="dashboard-sidebar__subtext">
             Restricted access to branch accounts, branch customers, branch transactions, and
             lending exposure.
@@ -53,7 +57,9 @@ function AdminDashboardLayout({
             <p className="dashboard-topbar__text">{description}</p>
           </div>
 
-          <div className="dashboard-user">
+          <div className="dashboard-topbar__actions">
+            <ThemeToggle theme={theme} onToggle={toggleTheme} />
+            <div className="dashboard-user">
             <div className="dashboard-user__meta">
               <strong>{storedUser.accountant_email || profile?.accountant_email || 'Admin account'}</strong>
               <span>{profile?.employee_role || 'Accountant access'}</span>
@@ -61,6 +67,7 @@ function AdminDashboardLayout({
             <div className="dashboard-user__avatar dashboard-user__avatar--admin">
               {getInitials(profile?.first_name, profile?.last_name)}
             </div>
+          </div>
           </div>
         </header>
 

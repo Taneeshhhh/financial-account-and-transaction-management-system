@@ -1,5 +1,8 @@
 import { Link, NavLink } from 'react-router-dom'
 import { getInitials, sidebarItems } from '../dashboard/customerDashboard.js'
+import BrandLogo from './BrandLogo.jsx'
+import ThemeToggle from './ThemeToggle.jsx'
+import { useTheme } from '../context/ThemeContext.jsx'
 
 function CustomerDashboardLayout({
   dashboard,
@@ -14,13 +17,14 @@ function CustomerDashboardLayout({
   children,
 }) {
   const profile = dashboard?.profile
+  const { theme, toggleTheme } = useTheme()
 
   return (
     <main className="dashboard-shell">
       <aside className="dashboard-sidebar">
         <div className="dashboard-sidebar__brand">
           <p className="hero-card__eyebrow">Customer Banking</p>
-          <h2>BlueCrest Bank</h2>
+          <BrandLogo label="BlueCrest Bank" sublabel="Customer Banking" compact />
           <span className="dashboard-sidebar__subtext">
             Unified view of your accounts, cards, loans, transfers, and profile.
           </span>
@@ -65,7 +69,9 @@ function CustomerDashboardLayout({
             <p className="dashboard-topbar__text">{description}</p>
           </div>
 
-          <div className="dashboard-user">
+          <div className="dashboard-topbar__actions">
+            <ThemeToggle theme={theme} onToggle={toggleTheme} />
+            <div className="dashboard-user">
             <div className="dashboard-user__meta">
               <strong>{storedUser.customer_email || profile?.customer_email || 'Customer account'}</strong>
               <span>{profile?.kyc_status ? `KYC ${profile.kyc_status}` : 'Customer Account'}</span>
@@ -73,6 +79,7 @@ function CustomerDashboardLayout({
             <div className="dashboard-user__avatar">
               {getInitials(profile?.first_name, profile?.last_name)}
             </div>
+          </div>
           </div>
         </header>
 
