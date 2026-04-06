@@ -55,6 +55,20 @@ export function useAdminDashboard() {
 
   const token = localStorage.getItem('token')
 
+  const clearSessionAndRedirect = (message = 'Your session expired. Please sign in again.') => {
+    localStorage.removeItem('token')
+    localStorage.removeItem('bank_user')
+    setDashboard(null)
+    setError(message)
+    navigate('/admin-login')
+  }
+
+  const isAuthFailure = (response, data) =>
+    response.status === 401 ||
+    /token expired|invalid authentication token|authentication token is required/i.test(
+      String(data?.message || '')
+    )
+
   const syncTransactionForm = (accounts) => {
     setTransactionForm((current) => ({
       ...current,
@@ -138,7 +152,7 @@ export function useAdminDashboard() {
 
   const loadDashboard = async () => {
     if (!token) {
-      navigate('/admin-login')
+      clearSessionAndRedirect()
       return
     }
 
@@ -159,6 +173,11 @@ export function useAdminDashboard() {
       })
 
       const data = await response.json().catch(() => ({}))
+
+      if (isAuthFailure(response, data)) {
+        clearSessionAndRedirect(data.message || 'Your session expired. Please sign in again.')
+        return
+      }
 
       if (!response.ok) {
         throw new Error(data.message || 'Failed to load the admin dashboard.')
@@ -185,9 +204,7 @@ export function useAdminDashboard() {
   }, [])
 
   const handleLogout = () => {
-    localStorage.removeItem('token')
-    localStorage.removeItem('bank_user')
-    navigate('/admin-login')
+    clearSessionAndRedirect('You have been signed out.')
   }
 
   const openPasswordModal = ({ title, description, confirmLabel, onConfirm }) => {
@@ -266,6 +283,11 @@ export function useAdminDashboard() {
       )
 
       const data = await response.json().catch(() => ({}))
+
+      if (isAuthFailure(response, data)) {
+        clearSessionAndRedirect(data.message || 'Your session expired. Please sign in again.')
+        return false
+      }
 
       if (!response.ok) {
         throw new Error(data.message || 'Failed to record the counter transaction.')
@@ -349,6 +371,11 @@ export function useAdminDashboard() {
 
       const data = await response.json().catch(() => ({}))
 
+      if (isAuthFailure(response, data)) {
+        clearSessionAndRedirect(data.message || 'Your session expired. Please sign in again.')
+        return false
+      }
+
       if (!response.ok) {
         throw new Error(data.message || 'Failed to review the loan application.')
       }
@@ -429,6 +456,11 @@ export function useAdminDashboard() {
 
       const data = await response.json().catch(() => ({}))
 
+      if (isAuthFailure(response, data)) {
+        clearSessionAndRedirect(data.message || 'Your session expired. Please sign in again.')
+        return false
+      }
+
       if (!response.ok) {
         throw new Error(data.message || 'Failed to update the account.')
       }
@@ -479,6 +511,11 @@ export function useAdminDashboard() {
       })
 
       const data = await response.json().catch(() => ({}))
+
+      if (isAuthFailure(response, data)) {
+        clearSessionAndRedirect(data.message || 'Your session expired. Please sign in again.')
+        return false
+      }
 
       if (!response.ok) {
         throw new Error(data.message || 'Failed to update the customer.')

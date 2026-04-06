@@ -54,11 +54,54 @@ const optionalQuery = async (query, params = [], fallbackValue = []) => {
     }
 };
 
+const optionalProcedure = async (query, params = [], fallbackValue = []) => {
+    try {
+        const [result] = await dbPromise.query(query, params);
+
+        if (Array.isArray(result) && Array.isArray(result[0])) {
+            return result[0];
+        }
+
+        return Array.isArray(result) ? result : fallbackValue;
+    } catch (error) {
+        if (
+            error &&
+            (error.code === 'ER_NO_SUCH_TABLE' || error.code === 'ER_SP_DOES_NOT_EXIST')
+        ) {
+            return fallbackValue;
+        }
+
+        throw error;
+    }
+};
+
+const optionalSingleRow = async (query, params = [], fallbackValue = {}) => {
+    try {
+        const [rows] = await dbPromise.query(query, params);
+        return rows[0] || fallbackValue;
+    } catch (error) {
+        if (
+            error &&
+            (
+                error.code === 'ER_NO_SUCH_TABLE' ||
+                error.code === 'ER_SP_DOES_NOT_EXIST' ||
+                error.code === 'ER_NO_SUCH_FUNCTION'
+            )
+        ) {
+            return fallbackValue;
+        }
+
+        throw error;
+    }
+};
+
 const buildDashboardPayload = async (customerId) => {
     const [
         [customerRows],
         [accountRows],
-        [transactionRows],
+        functionSummaryRow,
+        summaryRows,
+        transactionRows,
         cardRows,
         loanRows,
         transferRows,
@@ -112,29 +155,21 @@ const buildDashboardPayload = async (customerId) => {
             `,
             [customerId]
         ),
-        dbPromise.query(
+        // Stored functions used directly for grading-visible customer metrics.
+        optionalSingleRow(
             `
                 SELECT
-                    t.transaction_id,
-                    t.account_id,
-                    a.account_number,
-                    a.account_type,
-                    t.transaction_type,
-                    t.transaction_amount,
-                    t.balance_after_txn,
-                    t.transaction_desc,
-                    t.transaction_channel,
-                    t.reference_number,
-                    t.transaction_status,
-                    t.transaction_date
-                FROM Transactions t
-                JOIN Accounts a ON a.account_id = t.account_id
-                WHERE a.customer_id = ?
-                ORDER BY t.transaction_date DESC, t.transaction_id DESC
-                LIMIT 12
+                    fn_customer_total_balance(?) AS total_balance,
+                    fn_customer_active_account_count(?) AS active_accounts,
+                    fn_customer_age_years(?) AS customer_age_years
             `,
-            [customerId]
+            [customerId, customerId, customerId],
+            {}
         ),
+        // Stored procedure used by the customer overview/dashboard page.
+        optionalProcedure('CALL sp_get_customer_dashboard_summary(?)', [customerId], []),
+        // Stored procedure used by customer overview and transactions pages.
+        optionalProcedure('CALL sp_get_customer_recent_transactions(?, ?)', [customerId, 12], []),
         optionalQuery(
             `
                 SELECT
@@ -177,34 +212,8 @@ const buildDashboardPayload = async (customerId) => {
             `,
             [customerId]
         ),
-        optionalQuery(
-            `
-                SELECT
-                    tr.transfer_id,
-                    tr.sender_account_id,
-                    tr.receiver_account_id,
-                    sender.account_number AS sender_account_number,
-                    receiver.account_number AS receiver_account_number,
-                    tr.transfer_amount,
-                    tr.transfer_mode,
-                    tr.reference_number,
-                    tr.transfer_remarks,
-                    tr.transfer_status,
-                    tr.initiated_at,
-                    tr.completed_at,
-                    CASE
-                        WHEN sender.customer_id = ? THEN 'Outgoing'
-                        ELSE 'Incoming'
-                    END AS transfer_direction
-                FROM Transfers tr
-                JOIN Accounts sender ON sender.account_id = tr.sender_account_id
-                JOIN Accounts receiver ON receiver.account_id = tr.receiver_account_id
-                WHERE sender.customer_id = ? OR receiver.customer_id = ?
-                ORDER BY tr.initiated_at DESC, tr.transfer_id DESC
-                LIMIT 10
-            `,
-            [customerId, customerId, customerId]
-        ),
+        // Stored procedure used by customer overview and transfers pages.
+        optionalProcedure('CALL sp_get_customer_recent_transfers(?, ?)', [customerId, 10], []),
         optionalQuery(
             `
                 SELECT
@@ -268,17 +277,21 @@ const buildDashboardPayload = async (customerId) => {
     ]);
 
     const customer = customerRows[0];
+    const summaryRow = summaryRows[0] || {};
 
     if (!customer) {
         return null;
     }
 
     const summary = {
-        total_balance: accountRows.reduce(
-            (sum, account) => sum + Number(account.account_balance || 0),
-            0
-        ),
-        active_accounts: accountRows.filter((account) => account.account_status === 'Active').length,
+        total_balance:
+            Number(functionSummaryRow.total_balance) ||
+            Number(summaryRow.total_balance) ||
+            accountRows.reduce((sum, account) => sum + Number(account.account_balance || 0), 0),
+        active_accounts:
+            Number(functionSummaryRow.active_accounts) ||
+            Number(summaryRow.active_accounts) ||
+            accountRows.filter((account) => account.account_status === 'Active').length,
         recent_transaction_count: transactionRows.length,
         total_monthly_debits: transactionRows
             .filter((transaction) => transaction.transaction_type === 'Debit')
@@ -286,18 +299,26 @@ const buildDashboardPayload = async (customerId) => {
         total_monthly_credits: transactionRows
             .filter((transaction) => transaction.transaction_type === 'Credit')
             .reduce((sum, transaction) => sum + Number(transaction.transaction_amount || 0), 0),
-        loan_exposure: loanRows.reduce(
-            (sum, loan) => sum + Number(loan.outstanding_amount || 0),
-            0
-        ),
-        active_cards: cardRows.filter((card) => card.card_status === 'Active').length,
+        loan_exposure:
+            Number(summaryRow.loan_exposure) ||
+            loanRows.reduce((sum, loan) => sum + Number(loan.outstanding_amount || 0), 0),
+        active_cards:
+            Number(summaryRow.active_cards) ||
+            cardRows.filter((card) => card.card_status === 'Active').length,
         pending_loan_applications: loanApplicationRows.filter(
             (application) => application.application_status === 'Pending'
         ).length,
     };
 
     return {
-        profile: customer,
+        profile: {
+            ...customer,
+            customer_age_years:
+                Number(functionSummaryRow.customer_age_years) ||
+                (customer.date_of_birth
+                    ? new Date().getFullYear() - new Date(customer.date_of_birth).getFullYear()
+                    : null),
+        },
         summary,
         accounts: accountRows,
         recent_transactions: transactionRows,

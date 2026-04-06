@@ -146,6 +146,7 @@ const callTransferProcedure = async ({
     transferAmount,
     transferRemarks,
 }) => {
+    // Stored procedure used by the customer transfers page to execute an atomic transfer.
     await connection.query(
         `
             CALL sp_transfer_money(

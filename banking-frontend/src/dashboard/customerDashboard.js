@@ -136,6 +136,20 @@ export function useCustomerDashboard() {
 
   const token = localStorage.getItem('token')
 
+  const clearSessionAndRedirect = (message = 'Your session expired. Please sign in again.') => {
+    localStorage.removeItem('token')
+    localStorage.removeItem('bank_user')
+    setDashboard(null)
+    setError(message)
+    navigate('/')
+  }
+
+  const isAuthFailure = (response, data) =>
+    response.status === 401 ||
+    /token expired|invalid authentication token|authentication token is required/i.test(
+      String(data?.message || '')
+    )
+
   const syncProfileForm = (profile) => {
     setProfileForm({
       first_name: profile?.first_name || '',
@@ -210,7 +224,7 @@ export function useCustomerDashboard() {
 
   const loadDashboard = async () => {
     if (!token) {
-      navigate('/')
+      clearSessionAndRedirect()
       return
     }
 
@@ -231,6 +245,11 @@ export function useCustomerDashboard() {
       })
 
       const data = await response.json().catch(() => ({}))
+
+      if (isAuthFailure(response, data)) {
+        clearSessionAndRedirect(data.message || 'Your session expired. Please sign in again.')
+        return
+      }
 
       if (!response.ok) {
         throw new Error(data.message || 'Failed to load your dashboard.')
@@ -256,9 +275,7 @@ export function useCustomerDashboard() {
   }, [])
 
   const handleLogout = () => {
-    localStorage.removeItem('token')
-    localStorage.removeItem('bank_user')
-    navigate('/')
+    clearSessionAndRedirect('You have been signed out.')
   }
 
   const handleProfileChange = (event) => {
@@ -286,6 +303,11 @@ export function useCustomerDashboard() {
       })
 
       const data = await response.json().catch(() => ({}))
+
+      if (isAuthFailure(response, data)) {
+        clearSessionAndRedirect(data.message || 'Your session expired. Please sign in again.')
+        return
+      }
 
       if (!response.ok) {
         throw new Error(data.message || 'Profile update failed.')
@@ -342,6 +364,11 @@ export function useCustomerDashboard() {
       })
 
       const data = await response.json().catch(() => ({}))
+
+      if (isAuthFailure(response, data)) {
+        clearSessionAndRedirect(data.message || 'Your session expired. Please sign in again.')
+        return
+      }
 
       if (!response.ok) {
         throw new Error(data.message || 'Failed to create account.')
@@ -418,6 +445,11 @@ export function useCustomerDashboard() {
 
       const data = await response.json().catch(() => ({}))
 
+      if (isAuthFailure(response, data)) {
+        clearSessionAndRedirect(data.message || 'Your session expired. Please sign in again.')
+        return
+      }
+
       if (!response.ok) {
         throw new Error(data.message || 'Failed to update account status.')
       }
@@ -469,6 +501,11 @@ export function useCustomerDashboard() {
       })
 
       const data = await response.json().catch(() => ({}))
+
+      if (isAuthFailure(response, data)) {
+        clearSessionAndRedirect(data.message || 'Your session expired. Please sign in again.')
+        return
+      }
 
       if (!response.ok) {
         throw new Error(data.message || 'Failed to submit transaction.')
@@ -597,6 +634,11 @@ export function useCustomerDashboard() {
 
       const data = await response.json().catch(() => ({}))
 
+      if (isAuthFailure(response, data)) {
+        clearSessionAndRedirect(data.message || 'Your session expired. Please sign in again.')
+        return false
+      }
+
       if (!response.ok) {
         throw new Error(data.message || 'Failed to submit transfer.')
       }
@@ -683,6 +725,11 @@ export function useCustomerDashboard() {
 
       const data = await response.json().catch(() => ({}))
 
+      if (isAuthFailure(response, data)) {
+        clearSessionAndRedirect(data.message || 'Your session expired. Please sign in again.')
+        return
+      }
+
       if (!response.ok) {
         throw new Error(data.message || 'Failed to submit the loan application.')
       }
@@ -741,6 +788,11 @@ export function useCustomerDashboard() {
       )
 
       const data = await response.json().catch(() => ({}))
+
+      if (isAuthFailure(response, data)) {
+        clearSessionAndRedirect(data.message || 'Your session expired. Please sign in again.')
+        return
+      }
 
       if (!response.ok) {
         throw new Error(data.message || 'Failed to record the loan repayment.')

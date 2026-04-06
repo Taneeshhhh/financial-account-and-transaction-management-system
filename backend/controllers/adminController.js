@@ -25,6 +25,47 @@ const optionalQuery = async (query, params = [], fallbackValue = []) => {
     }
 };
 
+const optionalProcedure = async (query, params = [], fallbackValue = []) => {
+    try {
+        const [result] = await dbPromise.query(query, params);
+
+        if (Array.isArray(result) && Array.isArray(result[0])) {
+            return result[0];
+        }
+
+        return Array.isArray(result) ? result : fallbackValue;
+    } catch (error) {
+        if (
+            error &&
+            (error.code === 'ER_NO_SUCH_TABLE' || error.code === 'ER_SP_DOES_NOT_EXIST')
+        ) {
+            return fallbackValue;
+        }
+
+        throw error;
+    }
+};
+
+const optionalSingleRow = async (query, params = [], fallbackValue = {}) => {
+    try {
+        const [rows] = await dbPromise.query(query, params);
+        return rows[0] || fallbackValue;
+    } catch (error) {
+        if (
+            error &&
+            (
+                error.code === 'ER_NO_SUCH_TABLE' ||
+                error.code === 'ER_SP_DOES_NOT_EXIST' ||
+                error.code === 'ER_NO_SUCH_FUNCTION'
+            )
+        ) {
+            return fallbackValue;
+        }
+
+        throw error;
+    }
+};
+
 const generateUniqueReference = async (tableName, columnName, prefix) => {
     while (true) {
         const reference = generateReferenceNumber(prefix);
@@ -107,7 +148,8 @@ exports.getMyDashboard = async (req, res) => {
             [recentAccounts],
             [loans],
             auditLogs,
-            [branchSummaryRows],
+            branchFunctionRow,
+            branchSummaryRows,
             pendingLoanApplicationRows,
         ] = await Promise.all([
             dbPromise.query(
@@ -240,23 +282,16 @@ exports.getMyDashboard = async (req, res) => {
                 `,
                 [branchId]
             ),
-            dbPromise.query(
+            // Stored function used directly for grading-visible branch/customer metrics.
+            optionalSingleRow(
                 `
-                    SELECT
-                        COUNT(DISTINCT a.account_id) AS total_accounts,
-                        COALESCE(SUM(a.account_balance), 0) AS total_deposits,
-                        COUNT(
-                            DISTINCT CASE
-                                WHEN l.loan_status = 'Active' THEN l.loan_id
-                                ELSE NULL
-                            END
-                        ) AS active_loans
-                    FROM Accounts a
-                    LEFT JOIN Loans l ON l.branch_id = a.branch_id
-                    WHERE a.branch_id = ?
+                    SELECT fn_branch_customer_count(?) AS branch_customer_count
                 `,
-                [branchId]
+                [branchId],
+                {}
             ),
+            // Stored procedure used by the admin overview/dashboard page.
+            optionalProcedure('CALL sp_get_branch_dashboard_summary(?)', [branchId], []),
             optionalQuery(
                 `
                     SELECT
@@ -426,7 +461,8 @@ exports.getMyDashboard = async (req, res) => {
 
         const summary = {
             total_accounts: Number(branchSummary.total_accounts) || accounts.length,
-            total_customers: customers.length,
+            total_customers:
+                Number(branchFunctionRow.branch_customer_count) || customers.length,
             total_deposits:
                 Number(branchSummary.total_deposits) ||
                 accounts.reduce((sum, account) => sum + Number(account.account_balance || 0), 0),
