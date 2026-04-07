@@ -9,6 +9,7 @@ const dbPromise = db.promise();
 
 const COUNTER_TRANSACTION_TYPES = ['Credit', 'Debit'];
 const REVIEW_ACTIONS = ['approve', 'reject'];
+const FRAUD_ACTIONS = ['Flagged', 'Blocked', 'Under Review', 'Cleared', 'Reported to RBI'];
 
 const buildInClause = (values) => values.map(() => '?').join(', ');
 
@@ -147,6 +148,7 @@ exports.getMyDashboard = async (req, res) => {
             [recentTransactions],
             [recentAccounts],
             [loans],
+            fraudLogs,
             auditLogs,
             branchFunctionRow,
             branchSummaryRows,
@@ -256,6 +258,33 @@ exports.getMyDashboard = async (req, res) => {
                       AND l.loan_status = 'Active'
                     ORDER BY l.disbursement_date DESC, l.loan_id DESC
                     LIMIT 8
+                `,
+                [branchId]
+            ),
+            optionalQuery(
+                `
+                    SELECT
+                        fl.fraud_log_id,
+                        fl.transaction_id,
+                        fl.transfer_id,
+                        fl.account_id,
+                        fl.fraud_category,
+                        fl.risk_score,
+                        fl.fraud_severity,
+                        fl.fraud_description,
+                        fl.is_confirmed_fraud,
+                        fl.action_taken,
+                        fl.detected_at,
+                        fl.resolved_at,
+                        a.account_number,
+                        a.account_type,
+                        a.branch_id,
+                        CONCAT(c.first_name, ' ', c.last_name) AS customer_name
+                    FROM Fraud_Logs fl
+                    JOIN Accounts a ON a.account_id = fl.account_id
+                    JOIN Customers c ON c.customer_id = a.customer_id
+                    WHERE a.branch_id = ?
+                    ORDER BY fl.detected_at DESC, fl.fraud_log_id DESC
                 `,
                 [branchId]
             ),
@@ -470,6 +499,7 @@ exports.getMyDashboard = async (req, res) => {
                 Number(todayTransactionsResult?.total_transactions_today) || todayTransactionCount,
             active_loans: Number(branchSummary.active_loans) || loans.length,
             pending_loan_applications: pendingLoanApplications.length,
+            branch_fraud_alerts: fraudLogs.length,
             branch_audit_logs: auditLogs.length,
         };
 
@@ -482,6 +512,7 @@ exports.getMyDashboard = async (req, res) => {
             recent_accounts: recentAccounts,
             recent_transactions: recentTransactions,
             active_loans: loans,
+            fraud_logs: fraudLogs,
             audit_logs: auditLogs,
             pending_loan_applications: pendingLoanApplications,
         });
@@ -1262,5 +1293,126 @@ exports.updateBranchCustomer = async (req, res) => {
         }
 
         return res.status(500).json({ message: 'Failed to update customer details.' });
+    }
+};
+
+exports.updateBranchFraudLog = async (req, res) => {
+    const accountantId = req.user.accountant_id;
+    const fraudLogId = Number(req.params.fraudLogId);
+    const confirmPassword = String(req.body?.confirm_password || '');
+    const actionTaken = String(req.body?.action_taken || '').trim();
+    const reviewStatus = String(req.body?.review_status || '').trim();
+    const isConfirmedFraud = Number(req.body?.is_confirmed_fraud ? 1 : 0);
+
+    if (!Number.isInteger(fraudLogId)) {
+        return res.status(400).json({ message: 'A valid fraud log id is required.' });
+    }
+
+    if (!confirmPassword) {
+        return res.status(400).json({ message: 'confirm_password is required.' });
+    }
+
+    if (!FRAUD_ACTIONS.includes(actionTaken)) {
+        return res.status(400).json({
+            message: `action_taken must be one of: ${FRAUD_ACTIONS.join(', ')}`,
+        });
+    }
+
+    if (!['open', 'resolved'].includes(reviewStatus)) {
+        return res.status(400).json({
+            message: 'review_status must be either open or resolved.',
+        });
+    }
+
+    try {
+        const admin = await loadAdminContext(accountantId);
+
+        if (!admin) {
+            return res.status(404).json({ message: 'Admin account not found.' });
+        }
+
+        const passwordVerified = await verifyAdminPassword(accountantId, confirmPassword);
+
+        if (!passwordVerified) {
+            return res.status(401).json({ message: 'Password confirmation failed.' });
+        }
+
+        await dbPromise.beginTransaction();
+
+        const [rows] = await dbPromise.query(
+            `
+                SELECT
+                    fl.fraud_log_id,
+                    fl.account_id,
+                    fl.fraud_category,
+                    fl.action_taken,
+                    fl.is_confirmed_fraud,
+                    fl.resolved_at,
+                    a.account_number,
+                    a.branch_id
+                FROM Fraud_Logs fl
+                JOIN Accounts a ON a.account_id = fl.account_id
+                WHERE fl.fraud_log_id = ?
+                  AND a.branch_id = ?
+                FOR UPDATE
+            `,
+            [fraudLogId, admin.branch_id]
+        );
+
+        const fraudLog = rows[0];
+
+        if (!fraudLog) {
+            await dbPromise.rollback();
+            return res.status(404).json({ message: 'Fraud log not found in this branch.' });
+        }
+
+        const resolvedAtExpression =
+            reviewStatus === 'resolved'
+                ? 'COALESCE(resolved_at, NOW())'
+                : 'NULL';
+
+        await dbPromise.query(
+            `
+                UPDATE Fraud_Logs
+                SET
+                    action_taken = ?,
+                    is_confirmed_fraud = ?,
+                    resolved_at = ${resolvedAtExpression}
+                WHERE fraud_log_id = ?
+            `,
+            [actionTaken, isConfirmedFraud, fraudLogId]
+        );
+
+        await dbPromise.query(
+            `
+                INSERT INTO Audit_Logs (
+                    accountant_id,
+                    audit_action,
+                    target_table_name,
+                    target_record_id,
+                    old_value,
+                    new_value,
+                    audit_remarks
+                )
+                VALUES (?, 'Fraud Log Updated', 'Fraud_Logs', ?, ?, ?, ?)
+            `,
+            [
+                accountantId,
+                fraudLogId,
+                `action_taken: ${fraudLog.action_taken}, is_confirmed_fraud: ${fraudLog.is_confirmed_fraud}, resolved_at: ${fraudLog.resolved_at ?? 'NULL'}`,
+                `action_taken: ${actionTaken}, is_confirmed_fraud: ${isConfirmedFraud}, review_status: ${reviewStatus}`,
+                `Fraud case for source account ${fraudLog.account_number} updated by branch accountant.`,
+            ]
+        );
+
+        await dbPromise.commit();
+
+        return res.json({ message: 'Fraud log updated successfully.' });
+    } catch (error) {
+        try {
+            await dbPromise.rollback();
+        } catch {}
+
+        return res.status(500).json({ message: 'Failed to update fraud log.' });
     }
 };

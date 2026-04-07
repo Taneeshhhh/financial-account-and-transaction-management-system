@@ -7,12 +7,14 @@ export const adminTabs = [
   { id: 'cash', label: 'Dep / Withdraw' },
   { id: 'accounts', label: 'Accounts' },
   { id: 'loans', label: 'Loans' },
+  { id: 'fraud', label: 'Fraud Alerts' },
   { id: 'audit', label: 'Audit Logs' },
   { id: 'customers', label: 'Customers' },
 ]
 export const adminAccountTypeOptions = ['Savings', 'Current', 'Fixed Deposit', 'Recurring Deposit']
 export const adminAccountStatusOptions = ['Active', 'Inactive', 'Frozen', 'Closed']
 export const adminKycStatusOptions = ['Pending', 'Verified', 'Rejected']
+export const adminFraudActionOptions = ['Flagged', 'Blocked', 'Under Review', 'Cleared', 'Reported to RBI']
 
 const initialPasswordModalState = {
   isOpen: false,
@@ -34,11 +36,13 @@ export function useAdminDashboard() {
     transaction_desc: '',
   })
   const [loanReviewForms, setLoanReviewForms] = useState({})
+  const [fraudReviewForms, setFraudReviewForms] = useState({})
   const [accountEditForms, setAccountEditForms] = useState({})
   const [customerEditForms, setCustomerEditForms] = useState({})
   const [isLoading, setIsLoading] = useState(true)
   const [isSubmittingTransaction, setIsSubmittingTransaction] = useState(false)
   const [isReviewingLoanId, setIsReviewingLoanId] = useState(null)
+  const [isUpdatingFraudLogId, setIsUpdatingFraudLogId] = useState(null)
   const [isUpdatingAccountId, setIsUpdatingAccountId] = useState(null)
   const [isUpdatingCustomerId, setIsUpdatingCustomerId] = useState(null)
   const [error, setError] = useState('')
@@ -99,6 +103,26 @@ export function useAdminDashboard() {
               ? currentForm.annual_interest_rate
               : String(application.annual_interest_rate || ''),
           review_notes: currentForm.review_notes || '',
+        }
+      })
+
+      return next
+    })
+  }
+
+  const syncFraudReviewForms = (fraudLogs) => {
+    setFraudReviewForms((current) => {
+      const next = {}
+
+      fraudLogs?.forEach((fraudLog) => {
+        const currentForm = current[String(fraudLog.fraud_log_id)] || {}
+        next[String(fraudLog.fraud_log_id)] = {
+          action_taken: currentForm.action_taken || fraudLog.action_taken || adminFraudActionOptions[0],
+          review_status: currentForm.review_status || (fraudLog.resolved_at ? 'resolved' : 'open'),
+          is_confirmed_fraud:
+            currentForm.is_confirmed_fraud !== undefined
+              ? currentForm.is_confirmed_fraud
+              : Boolean(fraudLog.is_confirmed_fraud),
         }
       })
 
@@ -186,6 +210,7 @@ export function useAdminDashboard() {
       setDashboard(data)
       syncTransactionForm(data.accounts)
       syncLoanReviewForms(data.pending_loan_applications)
+      syncFraudReviewForms(data.fraud_logs)
       syncAccountEditForms(data.accounts)
       syncCustomerEditForms(data.customers)
     } catch (requestError) {
@@ -405,6 +430,24 @@ export function useAdminDashboard() {
     })
   }
 
+  const handleFraudReviewFieldChange = (fraudLogId, event) => {
+    const { name, value, type, checked } = event.target
+    const nextValue =
+      name === 'is_confirmed_fraud'
+        ? value === 'true'
+        : type === 'checkbox'
+          ? checked
+          : value
+
+    setFraudReviewForms((current) => ({
+      ...current,
+      [String(fraudLogId)]: {
+        ...current[String(fraudLogId)],
+        [name]: nextValue,
+      },
+    }))
+  }
+
   const handleAccountEditFieldChange = (accountId, event) => {
     const { name, value } = event.target
 
@@ -490,6 +533,64 @@ export function useAdminDashboard() {
     })
   }
 
+  const submitFraudLogUpdate = async (fraudLogId, confirmPassword) => {
+    const form = fraudReviewForms[String(fraudLogId)] || {}
+
+    setIsUpdatingFraudLogId(fraudLogId)
+    setError('')
+    setSuccess('')
+
+    try {
+      const response = await fetch(`${apiBaseUrl}/admin/fraud-logs/${fraudLogId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          action_taken: form.action_taken,
+          review_status: form.review_status,
+          is_confirmed_fraud: Boolean(form.is_confirmed_fraud),
+          confirm_password: confirmPassword,
+        }),
+      })
+
+      const data = await response.json().catch(() => ({}))
+
+      if (isAuthFailure(response, data)) {
+        clearSessionAndRedirect(data.message || 'Your session expired. Please sign in again.')
+        return false
+      }
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Failed to update the fraud log.')
+      }
+
+      setSuccess(data.message || 'Fraud log updated successfully.')
+      await loadDashboard()
+      return true
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : 'Something went wrong while updating the fraud log.'
+      )
+      return false
+    } finally {
+      setIsUpdatingFraudLogId(null)
+    }
+  }
+
+  const handleFraudLogUpdate = async (fraudLogId) => {
+    setError('')
+    openPasswordModal({
+      title: 'Update fraud case',
+      description: 'Enter your accountant password to update this fraud log entry.',
+      confirmLabel: 'Save Fraud Case',
+      onConfirm: (confirmPassword) => submitFraudLogUpdate(fraudLogId, confirmPassword),
+    })
+  }
+
   const submitCustomerUpdate = async (customerId, confirmPassword) => {
     const form = customerEditForms[String(customerId)] || {}
 
@@ -551,11 +652,13 @@ export function useAdminDashboard() {
     dashboard,
     transactionForm,
     loanReviewForms,
+    fraudReviewForms,
     accountEditForms,
     customerEditForms,
     isLoading,
     isSubmittingTransaction,
     isReviewingLoanId,
+    isUpdatingFraudLogId,
     isUpdatingAccountId,
     isUpdatingCustomerId,
     passwordModal,
@@ -568,6 +671,8 @@ export function useAdminDashboard() {
     handleTransactionSubmit,
     handleLoanReviewFieldChange,
     handleLoanReviewAction,
+    handleFraudReviewFieldChange,
+    handleFraudLogUpdate,
     handleAccountEditFieldChange,
     handleCustomerEditFieldChange,
     handleAccountUpdate,

@@ -3,6 +3,7 @@ import PasswordConfirmationModal from '../components/PasswordConfirmationModal.j
 import {
   adminAccountStatusOptions,
   adminAccountTypeOptions,
+  adminFraudActionOptions,
   adminKycStatusOptions,
   adminTabs,
   adminTransactionTypeOptions,
@@ -16,11 +17,13 @@ function AdminDashboardPage() {
     dashboard,
     transactionForm,
     loanReviewForms,
+    fraudReviewForms,
     accountEditForms,
     customerEditForms,
     isLoading,
     isSubmittingTransaction,
     isReviewingLoanId,
+    isUpdatingFraudLogId,
     isUpdatingAccountId,
     isUpdatingCustomerId,
     passwordModal,
@@ -33,6 +36,8 @@ function AdminDashboardPage() {
     handleTransactionSubmit,
     handleLoanReviewFieldChange,
     handleLoanReviewAction,
+    handleFraudReviewFieldChange,
+    handleFraudLogUpdate,
     handleAccountEditFieldChange,
     handleCustomerEditFieldChange,
     handleAccountUpdate,
@@ -48,11 +53,17 @@ function AdminDashboardPage() {
   const customers = dashboard?.customers || []
   const recentTransactions = dashboard?.recent_transactions || []
   const activeLoans = dashboard?.active_loans || []
+  const fraudLogs = dashboard?.fraud_logs || []
   const auditLogs = dashboard?.audit_logs || []
   const pendingLoanApplications = dashboard?.pending_loan_applications || []
   const selectedAccount = accounts.find(
     (account) => String(account.account_id) === String(transactionForm.account_id)
   )
+  const fraudCategoryCounts = fraudLogs.reduce((accumulator, fraudLog) => {
+    const key = fraudLog.fraud_category || 'Other'
+    accumulator[key] = (accumulator[key] || 0) + 1
+    return accumulator
+  }, {})
 
   const renderCashTab = () => (
     <div className="dashboard-layout">
@@ -387,6 +398,116 @@ function AdminDashboardPage() {
     </div>
   )
 
+  const renderFraudTab = () => (
+    <div className="dashboard-layout">
+      <div className="dashboard-column">
+        <article className="dashboard-panel">
+          <div className="dashboard-panel__header">
+            <div>
+              <p className="hero-card__eyebrow">Fraud Monitoring</p>
+              <h3>Suspicious activities flagged in this branch</h3>
+            </div>
+          </div>
+          <div className="dashboard-grid-cards">
+            {Object.keys(fraudCategoryCounts).length ? (
+              Object.entries(fraudCategoryCounts).map(([category, count]) => (
+                <article key={category} className="dashboard-mini-card">
+                  <strong>{category}</strong>
+                  <p>{count} alert{count === 1 ? '' : 's'} flagged for this branch.</p>
+                </article>
+              ))
+            ) : (
+              <p className="dashboard-empty">No fraud categories have been flagged for this branch yet.</p>
+            )}
+          </div>
+          <div className="dashboard-stack dashboard-form-section">
+            {fraudLogs.length ? (
+              fraudLogs.map((fraudLog) => (
+                (() => {
+                  const form = fraudReviewForms[String(fraudLog.fraud_log_id)] || {}
+
+                  return (
+                    <article key={fraudLog.fraud_log_id} className="dashboard-product-card">
+                      <div className="dashboard-product-card__head">
+                        <div>
+                          <strong>{fraudLog.fraud_category}</strong>
+                          <span>
+                            {fraudLog.account_number} · {fraudLog.customer_name} · {formatDate(fraudLog.detected_at, { timeStyle: 'short' })}
+                          </span>
+                        </div>
+                        <span className={`dashboard-badge dashboard-badge--${String(fraudLog.fraud_severity || '').toLowerCase()}`}>
+                          {fraudLog.fraud_severity || 'Flagged'}
+                        </span>
+                      </div>
+                      <div className="dashboard-product-card__grid">
+                        <p>Risk score: {fraudLog.risk_score ?? 'N/A'}</p>
+                        <p>Account type: {fraudLog.account_type || 'N/A'}</p>
+                        <p>Transaction ID: {fraudLog.transaction_id || 'N/A'}</p>
+                        <p>Transfer ID: {fraudLog.transfer_id || 'N/A'}</p>
+                        <p>Confirmed fraud: {fraudLog.is_confirmed_fraud ? 'Yes' : 'No'}</p>
+                        <p>Resolved at: {fraudLog.resolved_at ? formatDate(fraudLog.resolved_at, { timeStyle: 'short' }) : 'Open case'}</p>
+                      </div>
+                      <p>Description: {fraudLog.fraud_description || 'No description recorded.'}</p>
+                      <label className="field-group">
+                        <span>Action Taken</span>
+                        <select
+                          name="action_taken"
+                          value={form.action_taken || fraudLog.action_taken || 'Flagged'}
+                          onChange={(event) => handleFraudReviewFieldChange(fraudLog.fraud_log_id, event)}
+                          disabled={isUpdatingFraudLogId === fraudLog.fraud_log_id}
+                        >
+                          {adminFraudActionOptions.map((option) => (
+                            <option key={option} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="field-group">
+                        <span>Case Status</span>
+                        <select
+                          name="review_status"
+                          value={form.review_status || (fraudLog.resolved_at ? 'resolved' : 'open')}
+                          onChange={(event) => handleFraudReviewFieldChange(fraudLog.fraud_log_id, event)}
+                          disabled={isUpdatingFraudLogId === fraudLog.fraud_log_id}
+                        >
+                          <option value="open">Open</option>
+                          <option value="resolved">Resolved</option>
+                        </select>
+                      </label>
+                      <label className="field-group">
+                        <span>Confirmed Fraud</span>
+                        <select
+                          name="is_confirmed_fraud"
+                          value={Boolean(form.is_confirmed_fraud) ? 'true' : 'false'}
+                          onChange={(event) => handleFraudReviewFieldChange(fraudLog.fraud_log_id, event)}
+                          disabled={isUpdatingFraudLogId === fraudLog.fraud_log_id}
+                        >
+                          <option value="false">No</option>
+                          <option value="true">Yes</option>
+                        </select>
+                      </label>
+                      <button
+                        type="button"
+                        className="button-link button-link--primary"
+                        disabled={isUpdatingFraudLogId === fraudLog.fraud_log_id}
+                        onClick={() => handleFraudLogUpdate(fraudLog.fraud_log_id)}
+                      >
+                        {isUpdatingFraudLogId === fraudLog.fraud_log_id ? 'Saving...' : 'Update Fraud Log'}
+                      </button>
+                    </article>
+                  )
+                })()
+              ))
+            ) : (
+              <p className="dashboard-empty">No suspicious activities were found for this branch.</p>
+            )}
+          </div>
+        </article>
+      </div>
+    </div>
+  )
+
   const renderCustomersTab = () => (
     <div className="dashboard-layout">
       <div className="dashboard-column">
@@ -462,6 +583,7 @@ function AdminDashboardPage() {
         <article className="dashboard-card"><span>Transactions Today</span><strong>{summary?.total_transactions_today || 0}</strong><p>Branch transaction count for the current day.</p></article>
         <article className="dashboard-card"><span>Active Loans</span><strong>{summary?.active_loans || 0}</strong><p>Open loan accounts handled by this branch.</p></article>
         <article className="dashboard-card"><span>Pending Loan Requests</span><strong>{summary?.pending_loan_applications || 0}</strong><p>Applications waiting for accountant review.</p></article>
+        <article className="dashboard-card"><span>Fraud Alerts</span><strong>{summary?.branch_fraud_alerts || 0}</strong><p>Suspicious activities flagged on accounts in this branch.</p></article>
         <article className="dashboard-card"><span>Branch Audit Logs</span><strong>{summary?.branch_audit_logs || 0}</strong><p>Recent audit entries recorded by branch accountants.</p></article>
       </div>
 
@@ -476,6 +598,7 @@ function AdminDashboardPage() {
       {activeTab === 'cash' && renderCashTab()}
       {activeTab === 'accounts' && renderAccountsTab()}
       {activeTab === 'loans' && renderLoansTab()}
+      {activeTab === 'fraud' && renderFraudTab()}
       {activeTab === 'audit' && renderAuditTab()}
       {activeTab === 'customers' && renderCustomersTab()}
 

@@ -4,6 +4,7 @@ const {
     getMyDashboard,
     createCounterTransaction,
     reviewLoanApplication,
+    updateBranchFraudLog,
     updateBranchAccount,
     updateBranchCustomer,
 } = require('../controllers/adminController');
@@ -23,6 +24,7 @@ router.post(
     requireAdmin,
     reviewLoanApplication
 );
+router.put('/fraud-logs/:fraudLogId', requireAuth, requireAdmin, updateBranchFraudLog);
 router.put('/accounts/:accountId', requireAuth, requireAdmin, updateBranchAccount);
 router.put('/customers/:customerId', requireAuth, requireAdmin, updateBranchCustomer);
 

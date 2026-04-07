@@ -140,14 +140,13 @@ const loadTransferContext = async ({
 };
 
 const callTransferProcedure = async ({
-    connection,
     senderAccountId,
     receiverAccountId,
     transferAmount,
     transferRemarks,
 }) => {
     // Stored procedure used by the customer transfers page to execute an atomic transfer.
-    await connection.query(
+    await dbPromise.query(
         `
             CALL sp_transfer_money(
                 ?, ?, ?, ?, ?,
@@ -166,7 +165,7 @@ const callTransferProcedure = async ({
         ]
     );
 
-    const [[procedureOutput]] = await connection.query(
+    const [[procedureOutput]] = await dbPromise.query(
         `
             SELECT
                 @p_transfer_id AS transfer_id,
@@ -201,13 +200,9 @@ exports.createMyTransfer = async (req, res) => {
         });
     }
 
-    let connection;
-
     try {
-        connection = await dbPromise.getConnection();
-
         const transferContext = await loadTransferContext({
-            connection,
+            connection: dbPromise,
             customerId,
             senderAccountId,
             destinationAccountNumber,
@@ -226,17 +221,16 @@ exports.createMyTransfer = async (req, res) => {
             });
         }
 
-        await connection.beginTransaction();
+        await dbPromise.beginTransaction();
 
         const procedureOutput = await callTransferProcedure({
-            connection,
             senderAccountId: transferContext.senderAccount.account_id,
             receiverAccountId: transferContext.receiverAccount.account_id,
             transferAmount,
             transferRemarks,
         });
 
-        await connection.commit();
+        await dbPromise.commit();
 
         return res.status(201).json({
             message: 'Transfer successful.',
@@ -254,7 +248,7 @@ exports.createMyTransfer = async (req, res) => {
         });
     } catch (error) {
         try {
-            await connection?.rollback();
+            await dbPromise.rollback();
         } catch {
             // Ignore rollback failures and return the original request error response.
         }
@@ -265,10 +259,20 @@ exports.createMyTransfer = async (req, res) => {
             });
         }
 
+        if (error?.sqlMessage) {
+            return res.status(500).json({
+                message: error.sqlMessage,
+            });
+        }
+
+        if (error?.message) {
+            return res.status(500).json({
+                message: error.message,
+            });
+        }
+
         return res.status(500).json({
             message: 'Failed to complete transfer.',
         });
-    } finally {
-        connection?.release();
     }
 };
